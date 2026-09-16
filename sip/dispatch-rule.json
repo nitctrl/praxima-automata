@@ -1,7 +1,7 @@
 {
   "dispatch_rule": {
-    "name": "Exotel inbound rule",
-    "trunk_ids": ["ST_Joq9n7tKS88y"],
+    "name": "Plivo inbound rule",
+    "trunk_ids": ["__LIVEKIT_TRUNK_ID__"],
     "rule": {
       "dispatchRuleIndividual": { "roomPrefix": "call-" }
     },
