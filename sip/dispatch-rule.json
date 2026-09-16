@@ -1,0 +1,12 @@
+{
+  "dispatch_rule": {
+    "name": "Exotel inbound rule",
+    "trunk_ids": ["ST_Joq9n7tKS88y"],
+    "rule": {
+      "dispatchRuleIndividual": { "roomPrefix": "call-" }
+    },
+    "roomConfig": {
+      "agents": [{ "agentName": "inbound-agent" }]
+    }
+  }
+}

@@ -1,0 +1,19 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+sip/.creds
+sip/inbound-trunk.json
+sip/outbound-trunk.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Tooling
+.uv/
+.pytest_cache/
+.ruff_cache/
