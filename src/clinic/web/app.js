@@ -4,7 +4,7 @@ const $=id=>document.getElementById(id);
 const pages={
  today:["Home","What is live for the agent right now."],
  documents:["Knowledge","Stable clinic information from reviewed Markdown or Word documents."],
- temporary_notices:["Live Updates","Temporary closures, availability changes, and announcements."],
+ temporary_notices:["Live Updates","Temporary closures and changes. Scheduled updates are searchable immediately."],
  test:["Agent Test","Ask the same published knowledge used by new phone calls."],
  requests:["Requests","Appointment and callback requests requiring human follow-up."],
  call_sessions:["Calls","Sanitized call outcomes; recordings and transcripts are not stored."],
@@ -88,7 +88,7 @@ function updateState(row){const now=Date.now(),start=Date.parse(row.starts_at),e
 function liveUpdateEditor(row={}){
  const form=formCard(row.id?"Edit live update":"Add live update"),types=[["information","General, doctor, hours, or service update"],["closure","Clinic closure"],["no_walk_ins","No walk-ins"]],kind=picker(types,types.some(value=>value[0]===row.notice_type)?row.notice_type:"information","Update type"),message=node("textarea"),start=node("input"),end=node("input"),now=new Date();
  message.value=row.public_message||"";message.required=true;message.placeholder="Example: Dr Mahto is unavailable today after 4 PM.";start.type=end.type="datetime-local";start.required=end.required=true;start.value=localDateTime(row.starts_at||now);end.value=localDateTime(row.expires_at||new Date(now.getTime()+86400000));
- form.append(node("p","This overrides document information while it is active."),node("label","Type"),kind,node("label","What should patients know?"),message,node("label","Starts"),start,node("label","Expires"),end,node("button","Save update"));
+ form.append(node("p","The agent can see this after publication, but it applies only between the start and expiry."),node("label","Type"),kind,node("label","What should patients know?"),message,node("label","Starts"),start,node("label","Expires"),end,node("button","Save update"));
  form.addEventListener("submit",async event=>{event.preventDefault();const starts=new Date(start.value),expires=new Date(end.value);if(expires<=starts)throw new Error("Expiry must be after the start time.");const values={notice_type:kind.value,public_message:message.value.trim(),internal_note:"",starts_at:starts.toISOString(),expires_at:expires.toISOString(),priority:100,publication_status:row.publication_status||"draft",location_id:null,doctor_id:null,service_id:null};if(row.id)values.id=row.id;await api(base()+"/rows/temporary_notices",values);const result=row.publication_status==="published"?await publishChanges():null;await load("temporary_notices");$("message").textContent=result?`Live update changed · ${result.indexed??0} chunks indexed.`:"Saved. Publish when ready.";});
  $("content").replaceChildren(form);$("actions").replaceChildren(button("Back to live updates",()=>load("temporary_notices")));
 }

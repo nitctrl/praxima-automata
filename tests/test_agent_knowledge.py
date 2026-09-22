@@ -1,5 +1,6 @@
 import asyncio
 import copy
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -42,6 +43,7 @@ def test_agent_exposes_one_rag_tool(knowledge):
     assert "Current clinic-local time:" in knowledge.instructions
     assert "do not shorten or reinterpret" in knowledge.instructions
     assert "overrides conflicting document text" in knowledge.instructions
+    assert "open/closed question has no date or time" in knowledge.instructions
 
 
 def test_only_documents_are_stable_rag_knowledge(content):  # noqa: F811
@@ -72,10 +74,38 @@ def test_jinja_prompt_includes_active_quick_daily_info(content):  # noqa: F811
         "priority": 50,
     }]
     knowledge = AgentKnowledge(Snapshot.model_validate(payload), uuid4())
-    assert "Quick daily information currently in force" in knowledge.instructions
+    assert "Published current and scheduled live updates" in knowledge.instructions
     assert "Reception closes early today" in knowledge.instructions
     result = asyncio.run(knowledge.search_clinic_knowledge("Does reception close early today?"))
     assert "Reception closes early today" in str(result)
+
+
+def test_scheduled_live_update_is_searchable_before_it_starts(content):  # noqa: F811
+    payload = with_document(content)
+    start = datetime.now(timezone.utc) + timedelta(days=2)
+    end = start + timedelta(days=1)
+    payload["temporary_notices"] = [{
+        "id": str(UUID(int=72)),
+        "location_id": None,
+        "doctor_id": None,
+        "service_id": None,
+        "notice_type": "closure",
+        "public_message": "Clinic will be closed because of Devi Pujan.",
+        "starts_at": start.isoformat(),
+        "expires_at": end.isoformat(),
+        "priority": 100,
+    }]
+    knowledge = AgentKnowledge(Snapshot.model_validate(payload), uuid4())
+    assert "Published current and scheduled live updates" in knowledge.instructions
+    assert "Devi Pujan" in knowledge.instructions
+    result = asyncio.run(knowledge.search_clinic_knowledge(
+        f"Will the clinic be open on {start.date().isoformat()}?"
+    ))
+    passage = result["data"]["passages"][0]
+    assert passage["source"] == "Live update"
+    assert passage["heading"] == "Scheduled live update"
+    assert "Devi Pujan" in passage["text"]
+    assert start.date().isoformat() in passage["text"]
 
 
 def test_other_clinic_rejected(content):  # noqa: F811

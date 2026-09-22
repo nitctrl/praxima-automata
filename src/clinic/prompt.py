@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-from clinic.rag import active_quick_info
+from clinic.rag import published_live_updates
 from clinic.snapshot import Snapshot
 
 PROMPT_VERSION = "clinic-hybrid-rag-v1"
@@ -26,6 +26,6 @@ def render_prompt(snapshot: Snapshot) -> str:
         timezone=snapshot.timezone,
         supported_languages=snapshot.supported_languages,
         emergency_message=snapshot.emergency_message,
-        quick_info=active_quick_info(snapshot),
+        live_updates=published_live_updates(snapshot),
         current_local_time=datetime.now(ZoneInfo(snapshot.timezone)).isoformat(timespec="minutes"),
     ).strip()

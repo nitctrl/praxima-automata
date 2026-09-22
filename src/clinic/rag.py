@@ -1,4 +1,4 @@
-"""Hybrid-RRF retrieval over reviewed uploads and current daily updates."""
+"""Hybrid-RRF retrieval over reviewed uploads and unexpired live updates."""
 
 from __future__ import annotations
 
@@ -6,31 +6,40 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from clinic.documents import DocumentIndex, excerpt, tokens
-from clinic.snapshot import DocumentSection, Snapshot
+from clinic.snapshot import DocumentSection, Notice, Snapshot
 from clinic.vectors import VectorSearch
 
 logger = logging.getLogger(__name__)
 
 
+def _notice_text(snapshot: Snapshot, notice: Notice) -> str:
+    zone = ZoneInfo(snapshot.timezone)
+    start = notice.starts_at.astimezone(zone).isoformat(timespec="minutes")
+    end = notice.expires_at.astimezone(zone).isoformat(timespec="minutes")
+    return f"Applies from {start} until {end} in {snapshot.timezone}. {notice.public_message}"
+
+
 def snapshot_sections(snapshot: Snapshot) -> tuple[DocumentSection, ...]:
-    """Return only staff-reviewed documents and daily information currently in force."""
+    """Return reviewed documents plus current and scheduled published updates."""
     rows = list(snapshot.document_sections)
     now = datetime.now(timezone.utc)
     for notice in snapshot.temporary_notices:
-        if not notice.starts_at <= now < notice.expires_at:
+        if notice.expires_at <= now:
             continue
+        state = "Current" if notice.starts_at <= now else "Scheduled"
         rows.append(DocumentSection(
             id=notice.id,
             document_id=notice.id,
-            document_title="Daily update",
+            document_title="Live update",
             document_version=1,
-            topic="daily_update",
-            heading="Current daily update",
-            text=notice.public_message,
+            topic="live_update",
+            heading=f"{state} live update",
+            text=_notice_text(snapshot, notice),
             doctor_id=notice.doctor_id,
-            keywords=(),
+            keywords=("clinic", "open", "closed", "closure", "hours", "schedule"),
         ))
     return tuple(rows)
 
@@ -91,3 +100,10 @@ def active_quick_info(snapshot: Snapshot) -> tuple[str, ...]:
         for row in sorted(snapshot.temporary_notices, key=lambda item: -item.priority)
         if row.starts_at <= now < row.expires_at
     )
+
+
+def published_live_updates(snapshot: Snapshot) -> tuple[str, ...]:
+    """Bounded prompt context for current and scheduled published changes."""
+    now = datetime.now(timezone.utc)
+    rows = sorted(snapshot.temporary_notices, key=lambda row: (-row.priority, row.starts_at))
+    return tuple(_notice_text(snapshot, row) for row in rows if row.expires_at > now)[:50]
