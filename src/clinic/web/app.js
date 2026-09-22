@@ -9,14 +9,14 @@ const pages = {
   weekly_schedules: ["Weekly schedule", "Local clinic time. Split overnight hours into separate entries."],
   special_date_schedules: ["Special dates", "Date-specific schedules override weekly hours."],
   schedule_exceptions: ["Leave & exceptions", "Public messages and internal notes stay separate."],
-  temporary_notices: ["Notices", "Expired notices are excluded from caller answers."],
+  temporary_notices: ["Quick daily info", "Add or expire short-lived facts rendered into the Jinja voice prompt and RAG index."],
   locations: ["Locations", "Approved addresses, directions and parking information."],
   approved_faqs: ["Knowledge & review", "Approved question and answer wording for the phone assistant."],
   documents: ["Clinic documents", "Upload .docx or .md background text, review every line, then approve it for the next publication."],
   appointment_requests: ["Appointment requests", "Requests need human follow-up. Nothing here guarantees an available slot."],
   callback_requests: ["Callbacks", "Minimal administrative callback requests. Contact details require audited access."],
   call_sessions: ["Calls", "Sanitized outcomes only. No recordings or transcripts."],
-  test: ["Agent test", "Deterministic published-knowledge test; no phone call, LLM or usage charge."],
+  test: ["Agent test", "Hybrid semantic + lexical RRF search over the published clinic knowledge."],
   configuration_versions: ["Publish & history", "Review a preview before publishing. Existing calls retain their pinned version."],
   settings: ["Settings", "Language and approved messages are drafts until published."],
   clinic_users: ["Team", "Only owners can assign existing Auth users. You cannot change your own membership."],
@@ -135,19 +135,13 @@ async function load(key){current=key;$("message").textContent="";$("title").text
  if(key==="test"){
   const form=node("form",undefined,"card"),label=node("label","Ask about published clinic information"),question=node("input");
   question.required=true;question.maxLength=500;question.id="test-question";question.placeholder="Where would Dr Sharma be available?";label.htmlFor=question.id;
-  const advanced=node("details"),action=node("select"),query=node("textarea");
-  advanced.append(node("summary","Advanced: explicit knowledge lookup"));
-  for(const a of ["auto","faq","hours","doctors","availability","fees","documents"])action.append(node("option",a));
-  action.setAttribute("aria-label","Knowledge action");query.value="{}";query.setAttribute("aria-label","Optional structured query JSON");
-  advanced.append(node("label","Knowledge action"),action,node("label","Query fields (ignored in auto mode)"),query);
-  const submit=node("button","Ask"),clinicBase=base();let previousQuestion="";
-  form.append(label,question,node("p","Automatic lookup uses the published version, not unsaved drafts. If a name is ambiguous, answer with the full name."),advanced,submit);
+  const submit=node("button","Ask"),clinicBase=base();
+  form.append(label,question,node("p","Every question uses hybrid RRF retrieval over the published version. Unsaved drafts are never searched."),submit);
   form.addEventListener("submit",async e=>{
    e.preventDefault();submit.disabled=true;const asked=question.value;
    try{
-    const result=await api(clinicBase+"/test",{question:asked,action:action.value,query:action.value==="auto"?{}:JSON.parse(query.value),previous_question:previousQuestion});
+    const result=await api(clinicBase+"/test",{question:asked});
     if(current!=="test"||base()!==clinicBase||!form.isConnected)return;
-    previousQuestion=result.result?.status==="ambiguous"?asked:"";
     $("content").querySelector(".test-result")?.remove();
     const c=node("section",undefined,"card test-result");c.append(node("h2","Test answer — not a live call"),node("p",result.answer||"See the structured result below."));
     const details=node("details");details.append(node("summary","Source facts and lookup details"),node("pre",JSON.stringify(result,null,2)));c.append(details);$("content").append(c);
@@ -171,11 +165,19 @@ async function load(key){current=key;$("message").textContent="";$("title").text
  if(key==="clinic_users"&&role()==="owner")$("actions").append(button("Assign existing user",()=>membershipEditor()));
  table(rows,(row,td)=>{
    if(fields[key]&&manager()&&key!=="doctor_services")td.append(button("Edit draft",()=>edit(row)));
+   if(key==="temporary_notices"&&manager()){
+    const included=row.publication_status==="published";
+    td.append(button(included?"Remove from next publish":"Include in next publish",async()=>{
+     await api(base()+"/rows/temporary_notices",{id:row.id,publication_status:included?"archived":"published"});
+     await load("temporary_notices");
+     $("message").textContent="Quick daily information updated. Publish the configuration to apply it to calls.";
+    }));
+   }
    if(key==="configuration_versions"&&manager()&&[2,3].includes(row.schema_version)&&["published","superseded"].includes(row.status))td.append(button("Preview rollback",()=>preview(row.id)));
    if(["appointment_requests","callback_requests"].includes(key)&&["owner","manager","receptionist"].includes(role())){const kind=key==="appointment_requests"?"appointment":"callback";td.append(button("View contact (audited)",async()=>{const details=await api(base()+`/requests/${kind}/${row.id}/detail`,{});$("content").querySelector(".sensitive")?.remove();const c=card("Contact — authorized access recorded",details);c.classList.add("sensitive");c.append(button("Hide details",()=>c.remove()));$("content").prepend(c);}));const status=node("select");status.setAttribute("aria-label","Request status");for(const s of ["new","contacted",...(kind==="appointment"?["confirmed_externally"]:[]),"closed","cancelled"]){const opt=node("option",s);opt.selected=row.status===s;status.append(opt);}td.append(status,button("Update status",async()=>{if(status.value==="confirmed_externally"&&!confirm("Has a human confirmed this booking outside this system?"))return;await api(base()+`/requests/${kind}/${row.id}/status`,{status:status.value});await load(current);}));}
  });$("pagination").hidden=false;$("previous").disabled=offset===0;$("next").disabled=rows.length<50;$("page-number").textContent=`Page ${offset/50+1}`;
 }
-async function preview(source){const result=await api(base()+"/preview",source?{source}:{});$("content").replaceChildren(card(source?"Rollback preview — review before publishing":"Draft preview — review before publishing",result.snapshot));$("actions").replaceChildren(button("Publish reviewed version",async()=>{if(!confirm("Publish this reviewed configuration for NEW calls? Existing calls keep their version."))return;await api(base()+"/publish",{});await load("configuration_versions");$("message").textContent="Configuration published. Existing calls are unchanged."},""));$("pagination").hidden=true;}
+async function preview(source){const result=await api(base()+"/preview",source?{source}:{});$("content").replaceChildren(card(source?"Rollback preview — review before publishing":"Draft preview — review before publishing",result.snapshot));$("actions").replaceChildren(button("Publish reviewed version",async()=>{if(!confirm("Publish this reviewed configuration for NEW calls? Existing calls keep their version."))return;const published=await api(base()+"/publish",{});await load("configuration_versions");$("message").textContent=`Configuration published. ${published.indexed??0} knowledge chunks indexed for semantic search. Existing calls are unchanged.`;},""));$("pagination").hidden=true;}
 function edit(row){editing={row,key:current};$("edit-title").textContent=current==="settings"?"Edit approved messages":row.id?"Edit draft":"New draft";$("fields").replaceChildren();$("edit-error").textContent="";for(const name of fields[current].split(",")){const wrap=node("div"),label=node("label",name.replaceAll("_"," ")+(arrays.has(name)?" (comma separated)":""));const input=node(name.includes("message")||name.includes("description")||name.includes("answer")||name==="internal_note"?"textarea":"input");input.name=name;input.id=`field-${name}`;label.htmlFor=input.id;if(booleans.has(name)){input.type="checkbox";input.checked=row[name]??true;}else{input.value=arrays.has(name)?(row[name]||[]).join(", "):row[name]??"";if(numbers.has(name)){input.type="number";input.step="any";}else if(name.endsWith("_date")||name.startsWith("effective_"))input.type="date";else if(name.endsWith("_time"))input.type="time";else input.placeholder=name.endsWith("_id")?"UUID from the relevant list":name.endsWith("_at")?"2026-09-17T09:00:00+05:30":"";}wrap.append(label,input);$("fields").append(wrap);}$("editor").showModal();}
 $("close-editor").addEventListener("click",()=>$("editor").close());
 $("edit-form").addEventListener("submit",async e=>{e.preventDefault();const values={};for(const input of $("fields").querySelectorAll("input,textarea")){const name=input.name;if(booleans.has(name))values[name]=input.checked;else if(arrays.has(name))values[name]=input.value.split(",").map(x=>x.trim()).filter(Boolean);else if(input.value!=="")values[name]=numbers.has(name)?Number(input.value):input.value;else if(name in editing.row)values[name]=null;}if(editing.row.id)values.id=editing.row.id;try{await api(base()+(editing.key==="settings"?"/settings":`/rows/${editing.key}`),values);$("editor").close();await load(current);$("message").textContent="Draft saved. Review and publish to affect new calls.";}catch(err){$("edit-error").textContent=err.message;}});

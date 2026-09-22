@@ -31,17 +31,14 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from clinic.documents import (
     CATEGORIES,
     MAX_UPLOAD_BYTES,
-    DocumentIndex,
     DocumentRejected,
     DraftSection,
-    excerpt,
     extract,
     tag_doctors,
-    tokens,
 )
 from clinic.knowledge import Query, StructuredKnowledge
 from clinic.privacy import PiiCipher
-from clinic.safety import classify, response
+from clinic.rag import HybridRetriever, snapshot_sections
 from clinic.snapshot import Snapshot, normalize
 from clinic.vectors import VectorSearch
 
@@ -544,7 +541,7 @@ def create_app(
         try:
             snapshot = Snapshot.model_validate(published_version["snapshot"])
             return await vectors.index(
-                clinic, UUID(str(published_version["version_id"])), snapshot.document_sections
+                clinic, UUID(str(published_version["version_id"])), snapshot_sections(snapshot)
             )
         except Exception:
             logger.warning("Semantic index refresh failed; lexical search still serves calls")
@@ -800,22 +797,6 @@ def create_app(
     async def published(session: WebSession, clinic: UUID) -> Snapshot:
         return (await published_version(session, clinic))[1]
 
-    async def search_documents(
-        snapshot: Snapshot, question: str, clinic: UUID, version: UUID
-    ) -> list[tuple[float, Any]]:
-        """Fuse lexical and optional Qdrant rankings for the dashboard test surface."""
-        semantic: tuple[UUID, ...] = ()
-        if vectors is not None and snapshot.document_sections:
-            try:
-                semantic = tuple(await vectors.search(
-                    question, clinic=clinic, version=version, doctor_id=None, limit=10
-                ))
-            except Exception:
-                logger.warning("Semantic dashboard search failed; using lexical ranking")
-        return DocumentIndex(snapshot.document_sections).search(
-            question, semantic=semantic, limit=3
-        )
-
     @app.get("/api/clinics/{clinic}/today")
     async def today(clinic: UUID, request: Request) -> Any:
         session = await authorize(request, clinic)
@@ -868,87 +849,17 @@ def create_app(
         if not isinstance(text, str) or len(text) > 500:
             raise HTTPException(400, "Use a short administrative question.")
         version, snapshot = await published_version(session, clinic)
-        if values.get("action", "auto") == "auto":
-            from clinic.questions import answer_question
-
-            previous_text = values.get("previous_question", "")
-            if not isinstance(previous_text, str) or len(previous_text) > 500:
-                raise HTTPException(400, "Use a short previous question.")
-            knowledge = StructuredKnowledge(snapshot)
-            previous = answer_question(knowledge, previous_text) if previous_text else None
-            answer = answer_question(
-                knowledge, text,
-                language=previous.language if previous else None,
-                previous=previous,
-            )
-            # The deterministic auto router handles operational facts first. If a caller
-            # asks for background prose, fall back to reviewed sections in this same
-            # published snapshot. Hours, fees, addresses and availability never come here.
-            background = {
-                "qualification", "qualifications", "training", "trained", "experience",
-                "background", "biography", "story", "vision", "facilities", "achievements",
-                "education", "educational", "degree", "degrees", "credential", "credentials",
-                "study", "studied", "expertise", "career",
-            }
-            if answer.result.status in {"not_found", "unavailable"} and background.intersection(
-                tokens(text)
-            ):
-                found = await search_documents(snapshot, text, clinic, version)
-                if found:
-                    wanted = tokens(text)
-                    passages = [
-                        {
-                            "document": section.document_title,
-                            "heading": section.heading,
-                            "text": excerpt(section.text, wanted),
-                        }
-                        for _, section in found
-                    ]
-                    first = passages[0]
-                    label = first["heading"] or first["document"]
-                    return {
-                        "is_test": True,
-                        "answer": f"According to {label}: {first['text']}",
-                        "language": answer.language,
-                        "action": "documents",
-                        "query": {},
-                        "result": {"status": "success", "data": {"passages": passages}},
-                        "route": answer.route,
-                    }
-            return answer.public()
-        decision = classify(text)
-        if not decision.allow_tools:
-            return {
-                "is_test": True,
-                "route": decision.route,
-                "answer": response(decision, snapshot.emergency_message),
-            }
-        knowledge = StructuredKnowledge(snapshot)
-        action = values.get("action", "faq")
-        query = values.get("query", {})
-        if action == "documents":
-            found = await search_documents(snapshot, text, clinic, version)
-            return {"is_test": True, "route": decision.route, "result": {
-                "status": "success" if found else "unavailable",
-                "data": {"passages": [
-                    {"document": s.document_title, "heading": s.heading, "text": s.text}
-                    for _, s in found
-                ]},
-            }}
-        try:
-            parsed = Query.model_validate(query)
-            if action == "hours":
-                result = knowledge.current_status()
-            elif action == "doctors":
-                result = knowledge.find_doctors(parsed)
-            elif action == "availability":
-                result = knowledge.availability(parsed)
-            elif action == "fees":
-                result = knowledge.fee(parsed)
-            else:
-                result = knowledge.faq(text)
-        except (ValidationError, ValueError):
-            raise HTTPException(400, "Invalid administrative query.") from None
-        return {"is_test": True, "route": decision.route, "result": result.model_dump(mode="json")}
+        result = await HybridRetriever(snapshot, version, vectors).result(text)
+        passages = result["data"]["passages"]
+        answer = (
+            str(passages[0]["text"])
+            if passages else snapshot.fallback_message
+        )
+        return {
+            "is_test": True,
+            "action": "rag",
+            "answer": answer,
+            "result": result,
+        }
 
     return app

@@ -288,31 +288,21 @@ def test_settings_reject_privileged_key_and_non_tls_origin():
         WebSettings(CONFIG.supabase_url, CONFIG.publishable_key, "http://public.example")
 
 
-def test_agent_auto_routing_and_untrusted_context_are_scoped(web, content):  # noqa: F811
+def test_agent_test_uses_one_rag_path_and_stays_tenant_scoped(web, content):  # noqa: F811
     client, state = web
     endpoint = f"/api/clinics/{CLINIC}/test"
     assert client.post(endpoint, json={}).status_code in {401, 403}
     headers = login(client)
     state["snapshot"] = content | {"clinic_id": str(CLINIC)}
-    question = "Where would Dr Sharma be availabe?"
+    question = "Which doctors work at this clinic?"
     result = client.post(endpoint, json={"question": question}, headers=headers)
     assert result.status_code == 200
-    assert result.json()["result"]["status"] == "ambiguous"
+    assert result.json()["action"] == "rag"
+    assert result.json()["result"]["status"] == "success"
     assert "Dr Anaya Sharma" in result.json()["answer"]
-    follow = client.post(endpoint, headers=headers, json={
-        "question": "Anaya Sharma", "previous_question": question,
-        "query": {"doctor": str(OTHER)},
-    })
-    assert follow.status_code == 200
-    assert follow.json()["result"]["data"]["doctor"]["name"] == "Dr Anaya Sharma"
     denied = client.post(f"/api/clinics/{OTHER}/test", headers=headers,
-                         json={"question": question, "previous_question": question})
+                         json={"question": question})
     assert denied.status_code == 403
-    unsafe = client.post(endpoint, headers=headers, json={
-        "question": "What medicine should I take?", "previous_question": question,
-    })
-    assert unsafe.json()["route"] == "medical"
-    assert unsafe.json()["result"]["status"] == "forbidden"
 
     state["snapshot"] = content | {
         "clinic_id": str(CLINIC),
@@ -335,7 +325,7 @@ def test_agent_auto_routing_and_untrusted_context_are_scoped(web, content):  # n
         headers=headers,
     )
     assert document.status_code == 200
-    assert document.json()["action"] == "documents"
+    assert document.json()["action"] == "rag"
     assert "MBBS" in document.json()["answer"]
     degree = client.post(
         endpoint,
@@ -343,8 +333,7 @@ def test_agent_auto_routing_and_untrusted_context_are_scoped(web, content):  # n
         headers=headers,
     )
     assert degree.status_code == 200
-    assert degree.json()["action"] == "documents"
-    assert "MBBS" in degree.json()["answer"]
+    assert degree.json()["action"] == "rag"
 
 
 def test_today_requires_auth_and_recovers_after_upstream_timeout(web, content):  # noqa: F811

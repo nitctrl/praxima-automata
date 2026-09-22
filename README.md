@@ -18,9 +18,10 @@ in-memory version. Publish approved dashboard changes before starting a new sess
 Drafts, patient details, requests and other clinics are not loaded. The SIP path exposes
 Clinic A only for the explicitly approved called-number/trunk/rule combination.
 
-The LLM handles natural phrasing and follow-ups, calling structured tools for doctors,
-availability, fees, services, location and hours; an overview tool provides approved
-FAQs for paraphrased questions. Schedules are working hours, not bookable slots.
+The LLM handles natural phrasing and follow-ups through one hybrid-RRF knowledge tool.
+Published doctors, schedules, fees, locations, FAQs, notices and reviewed uploads are
+rendered into a single version-scoped retrieval corpus. Schedules are working hours,
+not bookable slots.
 If loading fails, tools report unavailable without stopping the voice pipeline or
 substituting the generic business demo's facts. Provider charges still apply.
 
@@ -66,13 +67,13 @@ reaches a caller. Staff review and edit every section, assign an optional doctor
 approve the document, and only the next **Preview → Publish** makes it part of the
 snapshot (`schema_version` 3, `document_sections`), for new calls only.
 
-The agent keeps structured tools authoritative for hours, fees, address and
-availability; the new `search_clinic_documents` tool answers open background
-questions from reviewed prose only, filtered by clinic, published version and
-doctor. Lexical search runs in-process with no network call. Optionally, the
-agent also searches a local Qdrant index and fuses its semantic ranking with the
-lexical ranking using reciprocal-rank fusion (RRF). Qdrant only receives reviewed
-sections from the published snapshot, never raw uploads:
+Publication converts both structured form data and reviewed uploaded prose into
+bounded knowledge chunks. Dashboard Agent test and the phone worker call the same
+`search_clinic_knowledge` path. It combines in-process lexical ranking with Qdrant
+semantic ranking using reciprocal-rank fusion (RRF). Qdrant receives only public facts
+from a reviewed published snapshot, never drafts or raw uploads. The phone system
+prompt is rendered from `agent_system_prompt.j2`; active **Quick daily info** notices
+are included in that prompt as well as the retrieval corpus:
 
 ```sh
 uv sync --extra semantic
@@ -80,9 +81,10 @@ docker compose up -d qdrant
 # .env: QDRANT_URL=http://127.0.0.1:6333
 ```
 
-After uploading, reviewing and publishing a document, start a new call. The
-publish action indexes its reviewed sections. Without `QDRANT_URL`, semantic
-search stays disabled and lexical document search continues to work.
+After changing a form or approving a document, use **Preview current drafts → Publish
+reviewed version**, then start a new call. Publication indexes the complete public
+corpus. Without `QDRANT_URL`, the same endpoint remains available with an explicit
+lexical fallback.
 
 ## Setup
 

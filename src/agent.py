@@ -11,23 +11,19 @@ Architecture (confirmed from introspection):
 
 import logging
 import os
-import json
-from typing import Annotated
 from pathlib import Path
 
 from dotenv import load_dotenv
-
 from livekit import rtc
 from livekit.agents import (
     JobContext,
     JobProcess,
+    RoomInputOptions,
     WorkerOptions,
     cli,
-    RoomInputOptions,
-    function_tool,
 )
 from livekit.agents.voice import Agent, AgentSession
-from livekit.plugins import sarvam, anthropic, noise_cancellation, silero
+from livekit.plugins import anthropic, noise_cancellation, sarvam, silero
 
 from clinic.agent_knowledge import AgentKnowledge, load_agent_knowledge
 from clinic.sip_test import ingress as clinic_ingress
@@ -46,129 +42,6 @@ logger.setLevel(logging.INFO)
 
 
 # ════════════════════════════════════════════════════════════════════
-#  RAG KNOWLEDGE BASE
-# ════════════════════════════════════════════════════════════════════
-
-class KnowledgeBase:
-    """
-    Pluggable RAG backend.
-    Swap search() with vector DB (Pinecone/Qdrant/Weaviate) for production.
-    """
-
-    def __init__(self, documents: list[dict] | None = None):
-        self.documents = documents or []
-
-    @classmethod
-    def from_json(cls, path: str) -> "KnowledgeBase":
-        file = Path(path)
-        if not file.exists():
-            logger.warning(f"KB file not found: {path}")
-            return cls([])
-        with open(file) as f:
-            return cls(json.load(f))
-
-    @classmethod
-    def default(cls) -> "KnowledgeBase":
-        return cls([
-            {
-                "topic": "pricing",
-                "content": (
-                    "Starter plan is ₹2,499/month, Pro is ₹6,999/month, "
-                    "Enterprise is custom. All include a 14-day free trial."
-                ),
-                "keywords": [
-                    "price", "pricing", "cost", "plan", "subscription",
-                    "pay", "money", "expensive", "cheap", "free trial",
-                ],
-            },
-            {
-                "topic": "business_hours",
-                "content": (
-                    "Open Monday–Friday 9 AM to 6 PM IST, "
-                    "Saturday 10 AM–2 PM. Closed Sundays and public holidays."
-                ),
-                "keywords": [
-                    "hours", "open", "close", "time", "schedule",
-                    "available", "when", "today", "tomorrow",
-                ],
-            },
-            {
-                "topic": "refund_policy",
-                "content": (
-                    "30-day money-back guarantee, no questions asked. "
-                    "Email support@example.com to request a refund."
-                ),
-                "keywords": [
-                    "refund", "return", "money back", "cancel",
-                    "cancellation", "guarantee",
-                ],
-            },
-            {
-                "topic": "contact",
-                "content": (
-                    "Email: support@example.com, Phone: +91-80-1234-5678, "
-                    "or use live chat on our website."
-                ),
-                "keywords": [
-                    "contact", "email", "phone", "call",
-                    "reach", "support", "help", "chat",
-                ],
-            },
-        ])
-
-    def search(self, query: str, top_k: int = 3) -> list[dict]:
-        query_lower = query.lower()
-        scored = []
-        for doc in self.documents:
-            score = sum(1 for kw in doc.get("keywords", []) if kw in query_lower)
-            if score > 0:
-                scored.append({
-                    "topic": doc["topic"],
-                    "content": doc["content"],
-                    "score": score,
-                })
-        scored.sort(key=lambda x: x["score"], reverse=True)
-        return scored[:top_k]
-
-
-knowledge_base = KnowledgeBase.default()
-
-
-# ════════════════════════════════════════════════════════════════════
-#  RAG TOOL
-# ════════════════════════════════════════════════════════════════════
-
-@function_tool()
-async def lookup_info(
-    query: Annotated[
-        str,
-        "The user's question or topic to search, e.g. 'pricing' or 'business hours'"
-    ],
-) -> str:
-    """Search the business knowledge base for factual information about
-    pricing, hours, policies, contact details, or services.
-    Always call this before answering any business-specific question."""
-
-    logger.info(f"[RAG] query={query!r}")
-    results = knowledge_base.search(query, top_k=3)
-
-    if not results:
-        logger.info("[RAG] no results")
-        return (
-            "No relevant information found in the knowledge base. "
-            "Let the user know you don't have that information "
-            "and suggest they contact support."
-        )
-
-    context = "\n".join(f"• [{r['topic']}] {r['content']}" for r in results)
-    logger.info(f"[RAG] {len(results)} results returned")
-    return (
-        f"Knowledge base results:\n{context}\n\n"
-        "Use this to answer the user naturally and concisely."
-    )
-
-
-# ════════════════════════════════════════════════════════════════════
 #  VOICE AGENT — all config lives HERE, not on AgentSession
 # ════════════════════════════════════════════════════════════════════
 
@@ -183,29 +56,7 @@ class VoiceAgent(Agent):
     ) -> None:
         self.clinic_knowledge = clinic_knowledge or AgentKnowledge(None)
         super().__init__(
-            instructions="""
-You are a helpful, friendly voice assistant for the clinic.
-
-LANGUAGE RULES (CRITICAL):
-- Detect the language the user is speaking and respond ONLY in that same language.
-- If the user speaks Hindi, respond ENTIRELY in Hindi. Do NOT add English translations.
-- If the user speaks English, respond ENTIRELY in English. Do NOT add Hindi translations.
-- NEVER mix languages unless the user itself speaks in mixed language such as HINGLISH(HINDI+ENGLISH) in the same response. NEVER repeat yourself in a second language.
-- If the user switches language mid-conversation, switch with them.
-
-RESPONSE RULES:
-- Keep every response to 1–3 short sentences. Voice ≠ text — be concise.
-- Sound natural, warm, and conversational — like a real person on a call.
-- Use short sentences. Break long thoughts into separate sentences.
-- It's okay to start with brief acknowledgements like "Right," "Okay," or "Got it" before answering.
-- NEVER output any markup, tags, angle brackets, or timing notations in your text.
-  Your output goes directly to a text-to-speech engine that reads everything literally.
-- When users ask about clinic facts, ALWAYS call the relevant clinic tool first.
-    Never guess facts or use generic business demo information.
-- If the tool returns no results, say so honestly.
-- Greet the user warmly when the conversation starts.
-
-            """ + self.clinic_knowledge.instructions,
+            instructions=self.clinic_knowledge.instructions,
 
             # ── Tools ──────────────────────────────────────────────
             tools=self.clinic_knowledge.function_tools(),

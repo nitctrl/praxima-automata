@@ -15,7 +15,7 @@ def test_original_voice_hooks_are_not_overridden():
     assert VoiceAgent.llm_node is Agent.llm_node
 
 
-def test_only_read_only_clinic_tools_are_attached(monkeypatch):
+def test_only_unified_rag_tool_is_attached(monkeypatch):
     import agent
 
     captured = {}
@@ -23,9 +23,9 @@ def test_only_read_only_clinic_tools_are_attached(monkeypatch):
     for provider, name in [(agent.sarvam, "STT"), (agent.sarvam, "TTS"), (agent.anthropic, "LLM")]:
         monkeypatch.setattr(provider, name, Mock())
     agent.VoiceAgent(telephony=True)
-    assert len(captured["tools"]) == 9
-    assert agent.lookup_info not in captured["tools"]
-    assert "information-only" in captured["instructions"]
+    assert len(captured["tools"]) == 1
+    assert not hasattr(agent, "lookup_info")
+    assert "Clinic knowledge is unavailable" in captured["instructions"]
     assert captured["min_endpointing_delay"] == 0.45
     assert captured["max_endpointing_delay"] == 1.2
     assert agent.anthropic.LLM.call_args.kwargs["temperature"] == 0.7
