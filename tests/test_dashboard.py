@@ -19,6 +19,10 @@ CONFIG = WebSettings("https://example.supabase.co", "sb_publishable_test", "http
 def web():
     state = {"role": "manager", "calls": [], "revoked": False}
 
+    async def answerer(question, snapshot, passages):
+        state["answer_request"] = {"question": question, "passages": passages}
+        return "Grounded answer: " + str(passages[0]["text"])
+
     def handle(request):
         state["calls"].append(request)
         path = request.url.path
@@ -65,7 +69,9 @@ def web():
         return httpx.Response(200, json=[{"id": str(uuid4())}])
 
     gateway = SupabaseGateway(CONFIG, httpx.MockTransport(handle))
-    with TestClient(create_app(CONFIG, gateway=gateway), base_url=CONFIG.origin) as client:
+    with TestClient(
+        create_app(CONFIG, gateway=gateway, answerer=answerer), base_url=CONFIG.origin
+    ) as client:
         yield client, state
 
 
@@ -298,8 +304,8 @@ def test_agent_test_uses_one_rag_path_and_stays_tenant_scoped(web, content):  # 
     result = client.post(endpoint, json={"question": question}, headers=headers)
     assert result.status_code == 200
     assert result.json()["action"] == "rag"
-    assert result.json()["result"]["status"] == "success"
-    assert "Dr Anaya Sharma" in result.json()["answer"]
+    assert result.json()["result"]["status"] == "unavailable"
+    assert result.json()["generated"] is False
     denied = client.post(f"/api/clinics/{OTHER}/test", headers=headers,
                          json={"question": question})
     assert denied.status_code == 403
@@ -326,7 +332,9 @@ def test_agent_test_uses_one_rag_path_and_stays_tenant_scoped(web, content):  # 
     )
     assert document.status_code == 200
     assert document.json()["action"] == "rag"
+    assert document.json()["generated"] is True
     assert "MBBS" in document.json()["answer"]
+    assert state["answer_request"]["question"] == "What qualification does Dr. Suresh have?"
     degree = client.post(
         endpoint,
         json={"question": "What degree did Dr. Suresh earn?"},

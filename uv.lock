@@ -1418,6 +1418,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
+    { name = "anthropic" },
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -1452,6 +1453,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.10,<4" },
+    { name = "anthropic", specifier = ">=0.70,<1" },
     { name = "cryptography", specifier = ">=44" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "fastembed", marker = "extra == 'semantic'", specifier = ">=0.4,<1" },

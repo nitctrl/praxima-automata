@@ -28,6 +28,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pydantic import ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from clinic.answers import GroundedAnswerer
 from clinic.documents import (
     CATEGORIES,
     MAX_UPLOAD_BYTES,
@@ -187,6 +188,7 @@ def create_app(
     *,
     gateway: SupabaseGateway | None = None,
     cipher: PiiCipher | None = None,
+    answerer: GroundedAnswerer | None = None,
 ) -> FastAPI:
     config = settings or WebSettings.from_environment()
     backend = gateway or SupabaseGateway(config)
@@ -851,14 +853,23 @@ def create_app(
         version, snapshot = await published_version(session, clinic)
         result = await HybridRetriever(snapshot, version, vectors).result(text)
         passages = result["data"]["passages"]
-        answer = (
-            str(passages[0]["text"])
-            if passages else snapshot.fallback_message
-        )
+        answer = snapshot.fallback_message
+        generated = False
+        if passages and answerer is not None:
+            try:
+                answer = await answerer(text, snapshot, passages)
+                generated = True
+            except Exception as exc:
+                logger.warning("Dashboard grounded answer failed (%s)", type(exc).__name__)
+                answer = (
+                    "Relevant published information was found, but a reliable answer could not "
+                    "be generated. Please review the source facts below."
+                )
         return {
             "is_test": True,
             "action": "rag",
             "answer": answer,
+            "generated": generated,
             "result": result,
         }
 
