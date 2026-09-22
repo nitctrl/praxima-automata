@@ -1,5 +1,6 @@
 # Secrets — never commit
 .env
+.clinic-dev-audio/
 .env.*
 !.env.example
 sip/.creds
@@ -17,3 +18,7 @@ venv/
 .uv/
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+dist/
+build/
+.qdrant_storage/
