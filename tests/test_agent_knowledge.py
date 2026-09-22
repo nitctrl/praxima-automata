@@ -41,6 +41,7 @@ def test_agent_exposes_one_rag_tool(knowledge):
     assert "specific date or date range" in knowledge.instructions
     assert "Current clinic-local time:" in knowledge.instructions
     assert "do not shorten or reinterpret" in knowledge.instructions
+    assert "overrides conflicting document text" in knowledge.instructions
 
 
 def test_only_documents_are_stable_rag_knowledge(content):  # noqa: F811

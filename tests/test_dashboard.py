@@ -58,7 +58,7 @@ def web():
             return httpx.Response(200, json=state["doctors"])
         if path == "/rest/v1/configuration_versions" and "snapshot" in state:
             return httpx.Response(
-                200, json=[{"id": str(VERSION), "snapshot": state["snapshot"]}]
+                200, json=[{"id": str(VERSION), "version_number": 7, "snapshot": state["snapshot"]}]
             )
         if path in {
             "/rest/v1/appointment_requests",
@@ -110,7 +110,7 @@ def test_secure_opaque_cookie_and_no_token_exposure(web):
 def test_origin_csrf_and_oversized_body(web):
     client, _ = web
     headers = login(client)
-    path = f"/api/clinics/{CLINIC}/rows/doctors"
+    path = f"/api/clinics/{CLINIC}/rows/temporary_notices"
     assert client.post(path, json={}, headers={"Origin": CONFIG.origin}).status_code == 403
     assert (
         client.post(path, json={}, headers=headers | {"Origin": "https://evil.example"}).status_code
@@ -124,10 +124,11 @@ def test_read_only_roles_cannot_author(web, role):
     client, state = web
     headers = login(client)
     state["role"] = role
-    assert client.get(f"/api/clinics/{CLINIC}/rows/doctors").status_code == 200
+    assert client.get(f"/api/clinics/{CLINIC}/rows/temporary_notices").status_code == 200
     assert (
         client.post(
-            f"/api/clinics/{CLINIC}/rows/doctors", json={"display_name": "Test"}, headers=headers
+            f"/api/clinics/{CLINIC}/rows/temporary_notices",
+            json={"public_message": "Test"}, headers=headers
         ).status_code
         == 403
     )
@@ -148,7 +149,6 @@ def send(client, headers, path, payload):
 def test_uploaded_document_is_parsed_and_stored_for_review(web):
     client, state = web
     headers = login(client)
-    state["doctors"] = [{"id": str(DOCTOR), "display_name": "Dr Anaya Sharma", "aliases": []}]
     result = send(
         client,
         headers,
@@ -192,10 +192,9 @@ def test_unsupported_and_oversized_uploads_are_refused(web):
     )
 
 
-def test_document_review_rejects_foreign_doctors_and_needs_manager(web):
+def test_document_review_removes_legacy_doctor_links_and_needs_manager(web):
     client, state = web
     headers = login(client)
-    state["doctors"] = [{"id": str(DOCTOR), "display_name": "Dr Anaya Sharma", "aliases": []}]
     section = {
         "id": str(uuid4()),
         "position": 0,
@@ -205,12 +204,13 @@ def test_document_review_rejects_foreign_doctors_and_needs_manager(web):
         "keywords": [],
     }
     path = f"/api/clinics/{CLINIC}/documents/{DOCUMENT}"
-    assert client.post(path, json={"sections": [section]}, headers=headers).status_code == 400
-    section["doctor_id"] = str(DOCTOR)
     assert client.post(path, json={"sections": [section]}, headers=headers).status_code == 200
+    saved = json.loads(state["calls"][-1].content)
+    assert saved["sections"][0]["doctor_id"] is None
+    assert client.post(path, json={"doctor_id": str(DOCTOR)}, headers=headers).status_code == 400
     assert client.post(path, json={"status": "published"}, headers=headers).status_code == 400
     state["role"] = "receptionist"
-    assert client.get(f"/api/clinics/{CLINIC}/documents").status_code == 403
+    assert client.get(f"/api/clinics/{CLINIC}/documents").status_code == 200
     assert client.post(path, json={"title": "Story"}, headers=headers).status_code == 403
 
 
@@ -231,35 +231,28 @@ def test_document_approval_requires_reviewed_sections(web):
 def test_cross_clinic_and_protected_fields_denied(web):
     client, _ = web
     headers = login(client)
-    assert client.get(f"/api/clinics/{OTHER}/rows/doctors").status_code == 403
+    assert client.get(f"/api/clinics/{OTHER}/rows/temporary_notices").status_code == 403
     assert client.get(f"/api/clinics/{CLINIC}/rows/caller_profiles").status_code == 404
     for body in [{"clinic_id": str(OTHER)}, {"normalized_name": "forged"}]:
         assert (
             client.post(
-                f"/api/clinics/{CLINIC}/rows/doctors", json=body, headers=headers
+                f"/api/clinics/{CLINIC}/rows/temporary_notices", json=body, headers=headers
             ).status_code
             == 400
         )
     assert client.get("/api/platform").status_code == 403
 
 
-def test_authoring_normalizes_name_binds_tenant_and_fees_append_only(web):
+def test_live_update_authoring_binds_tenant(web):
     client, state = web
     headers = login(client)
     result = client.post(
-        f"/api/clinics/{CLINIC}/rows/doctors", json={"display_name": "Dr. Sharma"}, headers=headers
+        f"/api/clinics/{CLINIC}/rows/temporary_notices",
+        json={"public_message": "Dr Mahto is unavailable today."}, headers=headers
     )
     assert result.json() == {"saved": True, "live": False}
     sent = json.loads(state["calls"][-1].content)
-    assert sent["clinic_id"] == str(CLINIC) and sent["normalized_name"] == "dr sharma"
-    assert (
-        client.post(
-            f"/api/clinics/{CLINIC}/rows/doctor_services",
-            json={"id": str(uuid4()), "current_fee": 12},
-            headers=headers,
-        ).status_code
-        == 403
-    )
+    assert sent["clinic_id"] == str(CLINIC)
 
 
 def test_revocation_and_logout(web):
@@ -362,6 +355,7 @@ def test_today_requires_auth_and_recovers_after_upstream_timeout(web, content): 
         "callback_requests": [],
     }
     assert result.json()["unresolved_calls"] == []
+    assert result.json()["version"]["number"] == 7
 
 
 @pytest.mark.parametrize("failure", ["connect", "timeout", "invalid_json", "server_error"])

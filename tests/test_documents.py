@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 import pytest
 from docx import Document as DocxDocument
 
-from clinic.documents import DocumentIndex, DocumentRejected, excerpt, extract, tag_doctors
+from clinic.documents import DocumentIndex, DocumentRejected, excerpt, extract
 from clinic.snapshot import DocumentSection
 
 DOCTOR = UUID(int=2)
@@ -99,19 +99,6 @@ def test_zip_bomb_and_macro_packages_are_rejected():
         archive.writestr("word/media/bomb.bin", b"0" * (21 * 1024 * 1024))
     with pytest.raises(DocumentRejected):
         extract("bomb.docx", buffer.getvalue())
-
-
-def test_sections_are_tagged_with_a_single_named_doctor():
-    sections = extract(
-        "bios.md",
-        (
-            b"# Dr Anaya Sharma\n\nShe trained in paediatrics.\n\n"
-            b"# Reception\n\nOur front desk helps with forms.\n"
-        ),
-    ).sections
-    tagged = tag_doctors(sections, [(DOCTOR, ["Dr Anaya Sharma"]), (OTHER, ["Dr Dev Sharma"])])
-    assert tagged[0].doctor_id == DOCTOR
-    assert tagged[1].doctor_id is None
 
 
 def test_search_filters_by_doctor_and_ignores_unrelated_questions():

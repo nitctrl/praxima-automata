@@ -1,251 +1,118 @@
-/* Tokens never enter browser storage. Render all database content as text, not HTML. */
+/* Tokens never enter browser storage. Database content is rendered only as text. */
 "use strict";
-const $ = id => document.getElementById(id);
-const pages = {
-  today: ["Today", "Published information for your front desk."],
-  documents: ["Knowledge", "Upload clinic documents, review the extracted text, and publish or unpublish them here."],
-  temporary_notices: ["Daily updates", "Publish short-lived changes such as doctor leave, changed hours, or service interruptions."],
-  doctors: ["Doctors", "Manage public doctor information and effective dates."],
-  services: ["Services", "Approved administrative service information."],
-  doctor_services: ["Fees", "Append-only fee history. Overlapping effective intervals are rejected."],
-  weekly_schedules: ["Weekly schedule", "Local clinic time. Split overnight hours into separate entries."],
-  special_date_schedules: ["Special dates", "Date-specific schedules override weekly hours."],
-  schedule_exceptions: ["Leave & exceptions", "Public messages and internal notes stay separate."],
-  locations: ["Locations", "Approved addresses, directions and parking information."],
-  appointment_requests: ["Appointment requests", "Requests need human follow-up. Nothing here guarantees an available slot."],
-  callback_requests: ["Callbacks", "Minimal administrative callback requests. Contact details require audited access."],
-  call_sessions: ["Calls", "Sanitized outcomes only. No recordings or transcripts."],
-  test: ["Agent test", "Hybrid semantic + lexical RRF search over the published clinic knowledge."],
-  settings: ["Settings", "Language and approved messages are drafts until published."],
-  clinic_users: ["Team", "Only owners can assign existing Auth users. You cannot change your own membership."],
-  usage_records: ["Usage", "Raw provider units. Unpriced rates are not billing estimates; test calls are not production traffic."],
-  audit_logs: ["Audit trail", "Append-only administrative actions and sensitive access events."],
-  platform: ["Platform", "Requires a separately provisioned platform administrator identity."]
+const $=id=>document.getElementById(id);
+const pages={
+ today:["Home","What is live for the agent right now."],
+ documents:["Knowledge","Stable clinic information from reviewed Markdown or Word documents."],
+ temporary_notices:["Live Updates","Temporary closures, availability changes, and announcements."],
+ test:["Agent Test","Ask the same published knowledge used by new phone calls."],
+ requests:["Requests","Appointment and callback requests requiring human follow-up."],
+ call_sessions:["Calls","Sanitized call outcomes; recordings and transcripts are not stored."],
+ settings:["Settings","Language and approved safety messages."]
 };
-const fields = {
- doctors:"display_name,speciality,aliases,languages,short_public_bio,accepts_new_patients,effective_from,effective_until,status",
- services:"name,aliases,short_approved_description,appointment_required,active,effective_from,effective_until",
- locations:"name,address,landmark,directions,map_url,parking_information,status,effective_from,effective_until",
- doctor_services:"doctor_id,service_id,current_fee,currency,effective_from,effective_until,status",
- weekly_schedules:"doctor_id,location_id,day_of_week,start_time,end_time,availability_type,status,effective_from,effective_until",
- special_date_schedules:"doctor_id,location_id,schedule_date,start_time,end_time,publication_status",
- schedule_exceptions:"doctor_id,location_id,exception_date,status,start_time,end_time,public_message,internal_note,publication_status",
- temporary_notices:"location_id,doctor_id,service_id,notice_type,public_message,internal_note,starts_at,expires_at,priority,publication_status",
- approved_faqs:"category,canonical_question,alternative_phrasings,approved_answer,effective_from,effective_until,publication_status",
- settings:"greeting,emergency_message,fallback_message,default_language,supported_languages"
-};
-const arrays=new Set(["aliases","languages","alternative_phrasings","supported_languages"]);
-const booleans=new Set(["accepts_new_patients","appointment_required","active"]);
-const numbers=new Set(["current_fee","day_of_week","priority"]);
-let csrf="", memberships=[], current="today", offset=0, editing=null;
+const categories=["about","vision","story","achievements","doctor_bio","facilities","policies","registration","other"];
+let csrf="",memberships=[],current="today";
 function node(tag,text,cls){const el=document.createElement(tag);if(text!==undefined)el.textContent=text;if(cls)el.className=cls;return el;}
 function button(text,fn,cls="secondary"){const el=node("button",text,cls);el.type="button";el.addEventListener("click",()=>Promise.resolve().then(fn).catch(showError));return el;}
+function base(){return `/api/clinics/${$("clinic").value}`;}
+function role(){return memberships.find(row=>row.clinic_id===$("clinic").value)?.role;}
+function manager(){return ["owner","manager"].includes(role());}
 function showError(error){
- if(error.status===401){csrf="";memberships=[];$("workspace").hidden=true;$("login-panel").hidden=false;$("logout").hidden=true;$("content").replaceChildren();$("actions").replaceChildren();$("navigation").replaceChildren();$("clinic").replaceChildren(node("option","Sign in to select"));$("clinic").disabled=true;$("editor").close();$("fields").replaceChildren();editing=null;$("title").textContent="Welcome to Reception";$("breadcrumb").textContent="A CALMER FRONT DESK";}
+ if(error.status===401){csrf="";memberships=[];$("workspace").hidden=true;$("login-panel").hidden=false;$("logout").hidden=true;$("navigation").replaceChildren();}
  $("message").textContent=error.status===401?"Your session ended. Please sign in again.":error.message||"Operation unavailable.";
 }
-function base(){return `/api/clinics/${$("clinic").value}`;}
-function role(){return memberships.find(m=>m.clinic_id===$("clinic").value)?.role;}
-function manager(){return ["owner","manager"].includes(role());}
-async function api(path,body){const options={headers:{}};if(body!==undefined){options.method="POST";options.headers={"Content-Type":"application/json","X-CSRF-Token":csrf};options.body=JSON.stringify(body);}const res=await fetch(path,options);const value=await res.json();if(!res.ok){const error=new Error(typeof value.detail==="string"?value.detail:`Request failed (${res.status}).`);error.status=res.status;throw error;}return value;}
-async function publishChanges(){
- await api(base()+"/preview",{});
- return api(base()+"/publish",{});
+async function api(path,body){
+ const options={headers:{}};
+ if(body!==undefined){options.method="POST";options.headers={"Content-Type":"application/json","X-CSRF-Token":csrf};options.body=JSON.stringify(body);}
+ const response=await fetch(path,options),value=await response.json();
+ if(!response.ok){const error=new Error(typeof value.detail==="string"?value.detail:`Request failed (${response.status}).`);error.status=response.status;throw error;}
+ return value;
 }
-async function changeAndPublish(path,next,previous){
- await api(path,next);
- try{return await publishChanges();}
- catch(error){try{await api(path,previous);}catch(ignored){/* Preserve the original publish error. */}throw error;}
+async function publishChanges(){await api(base()+"/preview",{});return api(base()+"/publish",{});}
+async function changeAndPublish(path,next,previous){await api(path,next);try{return await publishChanges();}catch(error){try{await api(path,previous);}catch{}throw error;}}
+async function signedIn(){
+ const me=await api("/api/me");csrf=me.csrf;memberships=me.memberships;
+ $("login-panel").hidden=true;$("workspace").hidden=false;$("logout").hidden=false;$("clinic").replaceChildren();
+ for(const membership of memberships){const option=node("option",membership.clinics?.name||membership.clinic_id);option.value=membership.clinic_id;$("clinic").append(option);}
+ $("clinic").disabled=false;$("navigation").replaceChildren();
+ for(const [key,[label]] of Object.entries(pages))$("navigation").append(button(label,()=>load(key),"nav-item"));
+ if(memberships.length)await load("today");else $("message").textContent="No active clinic membership.";
 }
-async function signedIn(){const me=await api("/api/me");csrf=me.csrf;memberships=me.memberships;$("login-panel").hidden=true;$("workspace").hidden=false;$("logout").hidden=false;$("clinic").replaceChildren();for(const m of memberships){const opt=node("option",m.clinics?.name||m.clinic_id);opt.value=m.clinic_id;$("clinic").append(opt);}$("clinic").disabled=false;$("navigation").replaceChildren();for(const [key,[label]] of Object.entries(pages))$("navigation").append(button(label,()=>{offset=0;return load(key);},"nav-item"));if(!memberships.length){$("message").textContent="No active clinic membership. Ask a clinic owner to assign access. Platform administrators may use Platform.";return;}await load("today");}
-$("login-form").addEventListener("submit",async e=>{e.preventDefault();$("message").textContent="";const submit=e.target.querySelector("button");submit.disabled=true;try{await api("/api/login",{email:$("email").value,password:$("password").value});$("password").value="";await signedIn();}catch(err){showError(err);}finally{submit.disabled=false;}});
-$("logout").addEventListener("click",async()=>{try{await api("/api/logout",{});}catch(err){showError(err);}finally{location.reload();}});
-$("clinic").addEventListener("change",()=>{offset=0;load(current).catch(showError);});
-$("previous").addEventListener("click",()=>{offset=Math.max(0,offset-50);load(current).catch(showError);});
-$("next").addEventListener("click",()=>{offset+=50;load(current).catch(showError);});
-function display(value){return value===null?"—":typeof value==="object"?JSON.stringify(value):String(value);}
-function table(rows,actions){if(!rows.length){$("content").append(node("div","No records yet. New records will appear here.","empty"));return;}const wrap=node("div",undefined,"table-wrap"), t=node("table"),head=node("tr");const keys=Object.keys(rows[0]);keys.forEach(k=>head.append(node("th",k.replaceAll("_"," "))));if(actions)head.append(node("th","Actions"));const thead=node("thead");thead.append(head);t.append(thead);const tbody=node("tbody");for(const row of rows){const tr=node("tr");for(const key of keys)tr.append(node("td",display(row[key])));if(actions){const td=node("td");actions(row,td);tr.append(td);}tbody.append(tr);}t.append(tbody);wrap.append(t);$("content").append(wrap);}
-function card(title,value){const c=node("section",undefined,"card");c.append(node("h2",title),node("pre",JSON.stringify(value,null,2)));return c;}
-const categories=["about","vision","story","achievements","doctor_bio","facilities","policies","registration","other"];
-function picker(options,selected,label){const el=node("select");el.setAttribute("aria-label",label);for(const [value,text] of options){const opt=node("option",text);opt.value=value;opt.selected=String(selected)===String(value);el.append(opt);}return el;}
+$("login-form").addEventListener("submit",async event=>{event.preventDefault();const submit=event.target.querySelector("button");submit.disabled=true;try{await api("/api/login",{email:$("email").value,password:$("password").value});$("password").value="";await signedIn();}catch(error){showError(error);}finally{submit.disabled=false;}});
+$("logout").addEventListener("click",async()=>{try{await api("/api/logout",{});}finally{location.reload();}});
+$("clinic").addEventListener("change",()=>load(current).catch(showError));
+window.addEventListener("unhandledrejection",event=>{event.preventDefault();showError(event.reason);});
+function section(title){const el=node("section",undefined,"card");el.append(node("h2",title));return el;}
+function formCard(title){const el=node("form",undefined,"card");el.append(node("h2",title));return el;}
+function status(text,live){return node("span",text,`status ${live?"published":"draft"}`);}
+function picker(values,selected,label){const el=node("select");el.setAttribute("aria-label",label);for(const [value,text] of values){const option=node("option",text);option.value=value;option.selected=value===selected;el.append(option);}return el;}
+function table(rows,actions,empty="No records yet."){
+ if(!rows.length)return node("div",empty,"empty");
+ const wrap=node("div",undefined,"table-wrap"),element=node("table"),head=node("tr"),keys=Object.keys(rows[0]);
+ for(const key of keys)head.append(node("th",key.replaceAll("_"," ")));if(actions)head.append(node("th","Actions"));
+ const thead=node("thead"),body=node("tbody");thead.append(head);element.append(thead);
+ for(const row of rows){const tr=node("tr");for(const key of keys)tr.append(node("td",row[key]===null?"—":typeof row[key]==="object"?JSON.stringify(row[key]):String(row[key])));if(actions){const td=node("td");actions(row,td);tr.append(td);}body.append(tr);}
+ element.append(body);wrap.append(element);return wrap;
+}
+function renderHome(value){
+ const grid=node("div",undefined,"metric-grid"),knowledge=section("Published knowledge"),updates=section("Active live updates"),requests=section("New requests"),calls=section("Calls needing review");
+ knowledge.append(node("p",`${value.knowledge_chunks} searchable chunks · version ${value.version.number}`));
+ for(const title of value.documents)knowledge.append(node("p",title));if(!value.documents.length)knowledge.append(node("p","No published documents."));knowledge.append(button("Manage knowledge",()=>load("documents")));
+ for(const message of value.live_updates)updates.append(node("p",message));if(!value.live_updates.length)updates.append(node("p","No live updates are active now."));updates.append(button("Manage live updates",()=>load("temporary_notices")));
+ const pending=value.pending_requests||{},requestCount=(pending.appointment_requests||[]).length+(pending.callback_requests||[]).length;
+ requests.append(node("p",`${requestCount} new requests`),button("Review requests",()=>load("requests")));calls.append(node("p",`${(value.unresolved_calls||[]).length} unresolved calls`),button("Review calls",()=>load("call_sessions")));
+ grid.append(knowledge,updates,requests,calls);$("content").append(grid);
+}
 async function upload(file,category){
- const url=base()+`/documents/upload?filename=${encodeURIComponent(file.name)}&category=${encodeURIComponent(category)}`;
- const res=await fetch(url,{method:"POST",headers:{"Content-Type":"application/octet-stream","X-CSRF-Token":csrf},body:file});
- const value=await res.json();if(!res.ok){const e=new Error(typeof value.detail==="string"?value.detail:`Upload failed (${res.status}).`);e.status=res.status;throw e;}return value;
+ const response=await fetch(base()+`/documents/upload?filename=${encodeURIComponent(file.name)}&category=${encodeURIComponent(category)}`,{method:"POST",headers:{"Content-Type":"application/octet-stream","X-CSRF-Token":csrf},body:file});
+ const value=await response.json();if(!response.ok){const error=new Error(value.detail||"Upload failed.");error.status=response.status;throw error;}return value;
+}
+function uploadEditor(){
+ const form=formCard("Upload document"),file=node("input"),category=picker(categories.map(value=>[value,value.replaceAll("_"," ")]),"about","Document type");file.type="file";file.accept=".docx,.md";file.required=true;
+ form.append(node("p","Upload Markdown or Word, review the extracted text, then publish."),file,category,node("button","Upload for review"));
+ form.addEventListener("submit",async event=>{event.preventDefault();const created=await upload(file.files[0],category.value);await reviewDocument(created.id);});$("content").replaceChildren(form);$("actions").replaceChildren(button("Back to knowledge",()=>load("documents")));
 }
 async function reviewDocument(id){
- const doc=await api(base()+`/documents/${id}`),people=await api(base()+"/rows/doctors?offset=0");
- const options=[["","Not about one doctor"],...people.map(p=>[p.id,p.display_name])];
- const form=node("form",undefined,"card"),title=node("input"),category=picker(categories.map(c=>[c,c]),doc.document_category,"Document type"),doctor=picker(options,doc.doctor_id||"","Doctor");
- title.value=doc.title||"";title.required=true;title.maxLength=200;title.setAttribute("aria-label","Document title");
- form.append(node("h2","Review document"),node("p",`${doc.original_filename} · version ${doc.version} · ${doc.status}`),node("label","Title"),title,node("label","Document type"),category,node("label","About which doctor"),doctor);
- for(const warning of doc.extraction_warnings||[])form.append(node("p",`Note: ${warning}`));
- const edited=(doc.sections||[]).map(section=>{
-  const block=node("div",undefined,"table-wrap"),heading=node("input"),text=node("textarea"),who=picker(options,section.doctor_id||"","Section doctor"),drop=node("input");
-  heading.value=section.heading||"";heading.maxLength=200;heading.setAttribute("aria-label","Section heading");
-  text.value=section.text||"";text.rows=4;text.setAttribute("aria-label","Section text");drop.type="checkbox";drop.setAttribute("aria-label","Remove this section");
-  block.append(heading,text,who,node("label","Remove this section"),drop);form.append(block);
-  return {section,heading,text,who,drop};
- });
- const checks=node("details");checks.append(node("summary","Before you approve"));
- for(const line of ["You have the right to publish this text.","No patient names, records or identifiable stories remain.","No guaranteed outcomes, medical advice or claims you cannot support.","Credentials and achievements are accurate and current."])checks.append(node("p",line));
- form.append(checks,node("button","Save reviewed text"));
- form.addEventListener("submit",async e=>{
-  e.preventDefault();
-  const sections=edited.filter(row=>!row.drop.checked&&row.text.value.trim()).map((row,position)=>({id:row.section.id,position,heading:row.heading.value,text:row.text.value.trim(),doctor_id:row.who.value||null,keywords:row.section.keywords||[]}));
-  try{
-   await api(base()+`/documents/${id}`,{title:title.value,document_category:category.value,doctor_id:doctor.value||null,sections});
-   const result=doc.status==="published"?await publishChanges():null;await load("documents");
-   $("message").textContent=result?`Published document updated. ${result.indexed??0} knowledge chunks indexed.`:"Document saved. Click Publish when it is ready for the agent.";
-  }catch(err){showError(err);}
- });
- $("content").replaceChildren(form);$("actions").replaceChildren(button("Back to documents",()=>load("documents")));$("pagination").hidden=true;
-}
-function uploadForm(){
- const form=node("form",undefined,"card"),file=node("input"),category=picker(categories.map(c=>[c,c]),"about","Document type");
- file.type="file";file.accept=".docx,.md";file.required=true;file.setAttribute("aria-label","Document file");
- form.append(node("h2","Upload background text"),node("p","Word (.docx) or Markdown (.md), up to 5 MB. Images, macros and tracked-change history are ignored."),file,category,node("button","Upload for review"));
- form.addEventListener("submit",async e=>{
-  e.preventDefault();const chosen=file.files[0];if(!chosen)return;
-  try{const created=await upload(chosen,category.value);await reviewDocument(created.id);$("message").textContent="Uploaded. Review the text, save it, then click Publish.";}catch(err){showError(err);}
- });
- return form;
-}
-function localDateTime(value){
- if(!value)return "";
- const date=new Date(value),shifted=new Date(date.getTime()-date.getTimezoneOffset()*60000);
- return shifted.toISOString().slice(0,16);
-}
-function dailyUpdateEditor(row={}){
- const form=node("form",undefined,"card compact-form"),message=node("textarea"),start=node("input"),end=node("input"),priority=node("input");
- const now=new Date(),tomorrow=new Date(now.getTime()+24*60*60*1000);
- message.required=true;message.maxLength=1000;message.value=row.public_message||"";message.placeholder="Example: Dr Sharma is unavailable today after 4 PM.";
- start.type="datetime-local";start.required=true;start.value=localDateTime(row.starts_at||now);
- end.type="datetime-local";end.required=true;end.value=localDateTime(row.expires_at||tomorrow);
- priority.type="number";priority.min="0";priority.max="100";priority.value=row.priority??50;
- form.append(node("h2",row.id?"Edit daily update":"Add daily update"),node("p","Keep this short and factual. It is added to the agent's instructions and searchable knowledge after you publish it."),node("label","What should patients know?"),message,node("label","Starts"),start,node("label","Expires"),end,node("label","Priority"),priority,node("button","Save update"));
- form.addEventListener("submit",async e=>{
-  e.preventDefault();
-  const startsAt=new Date(start.value),expiresAt=new Date(end.value);
-  if(expiresAt<=startsAt){$("message").textContent="Expiry must be after the start time.";return;}
-  const values={notice_type:row.notice_type||"information",public_message:message.value.trim(),internal_note:row.internal_note||"",starts_at:startsAt.toISOString(),expires_at:expiresAt.toISOString(),priority:Number(priority.value),publication_status:row.publication_status||"draft",location_id:row.location_id||null,doctor_id:row.doctor_id||null,service_id:row.service_id||null};
-  if(row.id)values.id=row.id;
-  try{
-   await api(base()+"/rows/temporary_notices",values);const result=row.publication_status==="published"?await publishChanges():null;await load("temporary_notices");
-   $("message").textContent=result?`Published daily update changed. ${result.indexed??0} knowledge chunks indexed.`:"Daily update saved. Click Publish when it is ready.";
-  }catch(err){showError(err);}
- });
- $("content").replaceChildren(form);$("actions").replaceChildren(button("Back to daily updates",()=>load("temporary_notices")));$("pagination").hidden=true;
-}
-function itemStatus(published){return node("span",published?"Published":"Not published",published?"status published":"status draft");}
-function renderDailyUpdates(rows){
- const list=node("div",undefined,"item-list");
- if(!rows.length){list.append(node("div","No daily updates yet.","empty"));$("content").append(list);return;}
- for(const row of rows){
-  const published=row.publication_status==="published",item=node("section",undefined,"card item-card"),head=node("div",undefined,"item-head"),actions=node("div",undefined,"item-actions");
-  head.append(node("h2",row.public_message),itemStatus(published));
-  item.append(head,node("p",`${new Date(row.starts_at).toLocaleString()} — ${new Date(row.expires_at).toLocaleString()}`));
-  if(manager())actions.append(button("Edit",()=>dailyUpdateEditor(row)));
-  if(manager())actions.append(button(published?"Unpublish":"Publish",async()=>{
-   if(!confirm(`${published?"Unpublish":"Publish"} this daily update?`))return;
-   const path=base()+"/rows/temporary_notices",result=await changeAndPublish(path,{id:row.id,publication_status:published?"archived":"published"},{id:row.id,publication_status:row.publication_status});await load("temporary_notices");
-   $("message").textContent=`Daily update ${published?"unpublished":"published"}. ${result.indexed??0} knowledge chunks indexed.`;
-  },published?"secondary":""));
-  item.append(actions);list.append(item);
- }
- $("content").append(list);
+ const doc=await api(base()+`/documents/${id}`),form=formCard("Review document"),title=node("input"),category=picker(categories.map(value=>[value,value.replaceAll("_"," ")]),doc.document_category,"Document type");title.value=doc.title||"";title.required=true;
+ form.append(node("p",doc.original_filename),node("label","Title"),title,node("label","Document type"),category);
+ const edited=(doc.sections||[]).map(source=>{const block=node("div",undefined,"table-wrap"),heading=node("input"),text=node("textarea"),remove=node("input");heading.value=source.heading||"";text.value=source.text||"";text.rows=5;remove.type="checkbox";block.append(node("label","Heading"),heading,node("label","Published text"),text,node("label","Remove section"),remove);form.append(block);return {source,heading,text,remove};});
+ form.append(node("button","Save reviewed text"));form.addEventListener("submit",async event=>{event.preventDefault();const sections=edited.filter(row=>!row.remove.checked&&row.text.value.trim()).map((row,position)=>({id:row.source.id,position,heading:row.heading.value,text:row.text.value.trim(),doctor_id:null,keywords:row.source.keywords||[]}));await api(base()+`/documents/${id}`,{title:title.value,document_category:category.value,sections});const result=doc.status==="published"?await publishChanges():null;await load("documents");$("message").textContent=result?`Published document updated · ${result.indexed??0} chunks indexed.`:"Saved. Publish when ready.";});
+ $("content").replaceChildren(form);$("actions").replaceChildren(button("Back to knowledge",()=>load("documents")));
 }
 function renderDocuments(rows){
- const list=node("div",undefined,"item-list");
- if(!rows.length){list.append(node("div","No documents yet. Upload a Markdown or Word document above.","empty"));$("content").append(list);return;}
- for(const row of rows){
-  const published=row.status==="published",item=node("section",undefined,"card item-card"),head=node("div",undefined,"item-head"),actions=node("div",undefined,"item-actions");
-  head.append(node("h2",row.title||row.original_filename||"Untitled document"),itemStatus(published));
-  item.append(head,node("p",`${row.original_filename||"Uploaded document"} · ${String(row.document_category||"other").replaceAll("_"," ")}`));
-  actions.append(button("Review",()=>reviewDocument(row.id)));
-  actions.append(button(published?"Unpublish":"Publish",async()=>{
-   if(!confirm(`${published?"Unpublish":"Publish"} this document for the dashboard test and phone agent?`))return;
-   const path=base()+`/documents/${row.id}/status`,result=await changeAndPublish(path,{status:published?"archived":"published"},{status:row.status});await load("documents");
-   $("message").textContent=`Document ${published?"unpublished":"published"}. ${result.indexed??0} knowledge chunks indexed for search.`;
-  },published?"secondary":""));
-  item.append(actions);list.append(item);
- }
- $("content").append(list);
+ const list=node("div",undefined,"item-list");if(!rows.length)list.append(node("div","No documents yet.","empty"));
+ for(const row of rows){const live=row.status==="published",item=section(row.title||row.original_filename),head=node("div",undefined,"item-head"),actions=node("div",undefined,"item-actions");head.append(node("span",row.original_filename),status(live?"Published":"Not published",live));item.prepend(head);if(manager())actions.append(button("Review",()=>reviewDocument(row.id)),button(live?"Unpublish":"Publish",async()=>{if(!confirm(`${live?"Unpublish":"Publish"} this document?`))return;const path=base()+`/documents/${row.id}/status`,result=await changeAndPublish(path,{status:live?"archived":"published"},{status:row.status});await load("documents");$("message").textContent=`Knowledge updated · ${result.indexed??0} chunks indexed.`;},live?"secondary":""));item.append(actions);list.append(item);}$("content").append(list);
 }
-function summaryCard(title){const c=node("section",undefined,"card");c.append(node("h2",title));return c;}
-function hoursText(hours){return (hours||[]).map(h=>`${h.start.slice(11,16)}–${h.end.slice(11,16)}`).join(", ");}
-function renderToday(value){
- const grid=node("div",undefined,"metric-grid"),status=summaryCard("Clinic status"),data=value.status?.data||{};
- status.append(node("h3",value.status?.status==="success"?(data.status==="open"?"Open now":"Closed now"):"Status needs clarification"));
- if(data.local_time)status.append(node("p",`${data.local_time.slice(0,10)} · ${data.timezone}`));
- status.append(node("p",data.hours?.length?`Published hours: ${hoursText(data.hours)}`:"No confirmed opening hours to display."));
- if(data.walk_ins_restricted)status.append(node("p","Walk-ins are currently restricted."));
- for(const notice of data.notices||[])status.append(node("p",notice));
- const doctors=summaryCard("Doctors & effective hours"),names=value.doctors?.data?.doctors||[];
- if(!names.length)doctors.append(node("p","No effective published doctors today."));
- for(const doctor of names){
-   const info=(value.doctor_hours||[]).find(r=>r.data?.doctor?.reference===doctor.reference)?.data;
-   doctors.append(node("h3",doctor.name),node("p",doctor.speciality));
-   doctors.append(node("p",info?(info.hours?.length?`${hoursText(info.hours)} · ${info.timezone}`:"No remaining published hours today."):"Hours need clarification; check the schedule and location."));
-   if(info?.walk_in_restricted_hours?.length)doctors.append(node("p",`Walk-ins restricted: ${hoursText(info.walk_in_restricted_hours)}`));
-   for(const notice of info?.notices||[])doctors.append(node("p",notice));
- }
- doctors.append(node("small","Working hours are not appointment slots. Staff must confirm requests."));
- const requests=summaryCard("New requests"),pending=value.pending_requests||{};
- for(const [key,label] of [["appointment_requests","Appointment requests"],["callback_requests","Callbacks"]]){
-   const count=(pending[key]||[]).length;requests.append(node("p",`${label}: ${count}${count===value.limit?"+":""}`),button(`Review ${label.toLowerCase()}`,()=>{offset=0;return load(key);}));
- }
- requests.append(node("small",`Showing up to ${value.limit||50} new requests per category, not a lifetime total.`));
- const calls=summaryCard("Unresolved production calls"),count=(value.unresolved_calls||[]).length;
- calls.append(node("p",count?`${count}${count===value.limit?"+":""} calls need review.`:"No unresolved production calls returned."),node("small","Test calls are excluded from this summary."),button("Review calls",()=>{offset=0;return load("call_sessions");}));
- grid.append(status,doctors,requests,calls);$("content").append(grid);
+function localDateTime(value){const date=new Date(value),shifted=new Date(date.getTime()-date.getTimezoneOffset()*60000);return shifted.toISOString().slice(0,16);}
+function updateState(row){const now=Date.now(),start=Date.parse(row.starts_at),end=Date.parse(row.expires_at);if(row.publication_status!=="published")return ["Not published",false];if(now<start)return ["Scheduled",true];if(now>=end)return ["Expired",false];return ["Active now",true];}
+function liveUpdateEditor(row={}){
+ const form=formCard(row.id?"Edit live update":"Add live update"),types=[["information","General, doctor, hours, or service update"],["closure","Clinic closure"],["no_walk_ins","No walk-ins"]],kind=picker(types,types.some(value=>value[0]===row.notice_type)?row.notice_type:"information","Update type"),message=node("textarea"),start=node("input"),end=node("input"),now=new Date();
+ message.value=row.public_message||"";message.required=true;message.placeholder="Example: Dr Mahto is unavailable today after 4 PM.";start.type=end.type="datetime-local";start.required=end.required=true;start.value=localDateTime(row.starts_at||now);end.value=localDateTime(row.expires_at||new Date(now.getTime()+86400000));
+ form.append(node("p","This overrides document information while it is active."),node("label","Type"),kind,node("label","What should patients know?"),message,node("label","Starts"),start,node("label","Expires"),end,node("button","Save update"));
+ form.addEventListener("submit",async event=>{event.preventDefault();const starts=new Date(start.value),expires=new Date(end.value);if(expires<=starts)throw new Error("Expiry must be after the start time.");const values={notice_type:kind.value,public_message:message.value.trim(),internal_note:"",starts_at:starts.toISOString(),expires_at:expires.toISOString(),priority:100,publication_status:row.publication_status||"draft",location_id:null,doctor_id:null,service_id:null};if(row.id)values.id=row.id;await api(base()+"/rows/temporary_notices",values);const result=row.publication_status==="published"?await publishChanges():null;await load("temporary_notices");$("message").textContent=result?`Live update changed · ${result.indexed??0} chunks indexed.`:"Saved. Publish when ready.";});
+ $("content").replaceChildren(form);$("actions").replaceChildren(button("Back to live updates",()=>load("temporary_notices")));
 }
-async function load(key){current=key;$("message").textContent="";$("title").textContent=pages[key][0];$("description").textContent=pages[key][1];$("breadcrumb").textContent=role()?`${role().toUpperCase()} WORKSPACE`:"WORKSPACE";$("content").replaceChildren();$("actions").replaceChildren();$("pagination").hidden=true;[...$("navigation").children].forEach((el,i)=>el.classList.toggle("active",Object.keys(pages)[i]===key));
- if(key==="platform"){try{$("content").append(card("Platform overview",await api("/api/platform")));}catch(error){if(error.status!==403)throw error;const c=summaryCard("Platform access is separate");c.append(node("p","This account does not have platform-administrator access. Clinic owners can manage only their assigned clinics."));$("content").append(c);}return;}
- if(!$("clinic").value)throw new Error("Select an authorized clinic first.");
- if(key==="today"){const endpoint=base()+"/today";$("content").append(node("p","Loading published clinic information…"));try{const value=await api(endpoint);if(current!==key||base()+"/today"!==endpoint)return;$("content").replaceChildren();renderToday(value);}catch(error){if(current!==key||base()+"/today"!==endpoint)return;$("content").replaceChildren();if(error.status===401)throw error;const c=summaryCard("Today is unavailable");c.append(node("p",error.message||"Could not reach the clinic service. Check your connection and try again."),button("Retry Today",()=>load("today")));$("content").append(c);}return;}
- if(key==="test"){
-  const form=node("form",undefined,"card"),label=node("label","Ask about published clinic information"),question=node("input");
-  question.required=true;question.maxLength=500;question.id="test-question";question.placeholder="Where would Dr Sharma be available?";label.htmlFor=question.id;
-  const submit=node("button","Ask"),clinicBase=base();
-  form.append(label,question,node("p","Every question uses hybrid RRF retrieval over the published version. Unsaved drafts are never searched."),submit);
-  form.addEventListener("submit",async e=>{
-   e.preventDefault();submit.disabled=true;const asked=question.value;
-   try{
-    const result=await api(clinicBase+"/test",{question:asked});
-    if(current!=="test"||base()!==clinicBase||!form.isConnected)return;
-    $("content").querySelector(".test-result")?.remove();
-    const c=node("section",undefined,"card test-result");c.append(node("h2","Test answer — not a live call"),node("p",result.answer||"See the structured result below."));
-    const details=node("details");details.append(node("summary","Source facts and lookup details"),node("pre",JSON.stringify(result,null,2)));c.append(details);$("content").append(c);
-   }catch(err){showError(err);}finally{submit.disabled=false;}
-  });$("content").append(form);return;
- }
- if(key==="settings"){const rows=await api(base()+"/settings");$("content").append(card("Clinic settings",rows[0]));if(manager())$("actions").append(button("Edit messages & languages",()=>edit(rows[0])));return;}
- if(key==="documents"){
-  if(!manager()){$("content").append(node("div","Only clinic owners and managers can review uploaded documents.","empty"));return;}
-  $("content").append(uploadForm());
-  renderDocuments(await api(base()+"/documents"));
-  return;
- }
- if(key==="temporary_notices"){
-  const rows=await api(base()+"/rows/temporary_notices?offset=0");
-  if(manager())$("actions").append(button("＋ Add daily update",()=>dailyUpdateEditor({}),""));
-  renderDailyUpdates(rows);
-  return;
- }
- const rows=await api(base()+`/rows/${key}?offset=${offset}`);
- if(fields[key]&&manager())$("actions").append(button("＋ Add draft",()=>edit({}),""));
- if(key==="configuration_versions"&&manager())$("actions").append(button("Preview current drafts",()=>preview(),""));
- if(key==="clinic_users"&&role()==="owner")$("actions").append(button("Assign existing user",()=>membershipEditor()));
- table(rows,(row,td)=>{
-   if(fields[key]&&manager()&&key!=="doctor_services")td.append(button("Edit draft",()=>edit(row)));
-   if(key==="configuration_versions"&&manager()&&[2,3].includes(row.schema_version)&&["published","superseded"].includes(row.status))td.append(button("Preview rollback",()=>preview(row.id)));
-   if(["appointment_requests","callback_requests"].includes(key)&&["owner","manager","receptionist"].includes(role())){const kind=key==="appointment_requests"?"appointment":"callback";td.append(button("View contact (audited)",async()=>{const details=await api(base()+`/requests/${kind}/${row.id}/detail`,{});$("content").querySelector(".sensitive")?.remove();const c=card("Contact — authorized access recorded",details);c.classList.add("sensitive");c.append(button("Hide details",()=>c.remove()));$("content").prepend(c);}));const status=node("select");status.setAttribute("aria-label","Request status");for(const s of ["new","contacted",...(kind==="appointment"?["confirmed_externally"]:[]),"closed","cancelled"]){const opt=node("option",s);opt.selected=row.status===s;status.append(opt);}td.append(status,button("Update status",async()=>{if(status.value==="confirmed_externally"&&!confirm("Has a human confirmed this booking outside this system?"))return;await api(base()+`/requests/${kind}/${row.id}/status`,{status:status.value});await load(current);}));}
- });$("pagination").hidden=false;$("previous").disabled=offset===0;$("next").disabled=rows.length<50;$("page-number").textContent=`Page ${offset/50+1}`;
+function renderLiveUpdates(rows){
+ const list=node("div",undefined,"item-list");if(!rows.length)list.append(node("div","No live updates yet.","empty"));
+ for(const row of rows){const [label,active]=updateState(row),published=row.publication_status==="published",item=section(row.public_message),head=node("div",undefined,"item-head"),actions=node("div",undefined,"item-actions");head.append(node("span",`${new Date(row.starts_at).toLocaleString()} — ${new Date(row.expires_at).toLocaleString()}`),status(label,active));item.prepend(head);if(manager())actions.append(button("Edit",()=>liveUpdateEditor(row)),button(published?"Unpublish":"Publish",async()=>{if(!confirm(`${published?"Unpublish":"Publish"} this update?`))return;const path=base()+"/rows/temporary_notices",result=await changeAndPublish(path,{id:row.id,publication_status:published?"archived":"published"},{id:row.id,publication_status:row.publication_status});await load("temporary_notices");$("message").textContent=`Live updates published · ${result.indexed??0} chunks indexed.`;},published?"secondary":""));item.append(actions);list.append(item);}$("content").append(list);
 }
-async function preview(source){const result=await api(base()+"/preview",source?{source}:{});$("content").replaceChildren(card(source?"Rollback preview — review before publishing":"Draft preview — review before publishing",result.snapshot));$("actions").replaceChildren(button("Publish reviewed version",async()=>{if(!confirm("Publish this reviewed configuration for NEW calls? Existing calls keep their version."))return;const published=await api(base()+"/publish",{});await load("configuration_versions");$("message").textContent=`Configuration published. ${published.indexed??0} knowledge chunks indexed for semantic search. Existing calls are unchanged.`;},""));$("pagination").hidden=true;}
-function edit(row){editing={row,key:current};$("edit-title").textContent=current==="settings"?"Edit approved messages":row.id?"Edit draft":"New draft";$("fields").replaceChildren();$("edit-error").textContent="";for(const name of fields[current].split(",")){const wrap=node("div"),label=node("label",name.replaceAll("_"," ")+(arrays.has(name)?" (comma separated)":""));const input=node(name.includes("message")||name.includes("description")||name.includes("answer")||name==="internal_note"?"textarea":"input");input.name=name;input.id=`field-${name}`;label.htmlFor=input.id;if(booleans.has(name)){input.type="checkbox";input.checked=row[name]??true;}else{input.value=arrays.has(name)?(row[name]||[]).join(", "):row[name]??"";if(numbers.has(name)){input.type="number";input.step="any";}else if(name.endsWith("_date")||name.startsWith("effective_"))input.type="date";else if(name.endsWith("_time"))input.type="time";else input.placeholder=name.endsWith("_id")?"UUID from the relevant list":name.endsWith("_at")?"2026-09-17T09:00:00+05:30":"";}wrap.append(label,input);$("fields").append(wrap);}$("editor").showModal();}
-$("close-editor").addEventListener("click",()=>$("editor").close());
-$("edit-form").addEventListener("submit",async e=>{e.preventDefault();const values={};for(const input of $("fields").querySelectorAll("input,textarea")){const name=input.name;if(booleans.has(name))values[name]=input.checked;else if(arrays.has(name))values[name]=input.value.split(",").map(x=>x.trim()).filter(Boolean);else if(input.value!=="")values[name]=numbers.has(name)?Number(input.value):input.value;else if(name in editing.row)values[name]=null;}if(editing.row.id)values.id=editing.row.id;try{await api(base()+(editing.key==="settings"?"/settings":`/rows/${editing.key}`),values);$("editor").close();await load(current);$("message").textContent="Draft saved. Review and publish to affect new calls.";}catch(err){$("edit-error").textContent=err.message;}});
-function membershipEditor(){const c=node("form",undefined,"card"),user=node("input"),r=node("select"),active=node("input");user.placeholder="Existing Supabase Auth user UUID";user.required=true;user.setAttribute("aria-label","Auth user ID");for(const value of ["viewer","receptionist","manager","owner"])r.append(node("option",value));r.setAttribute("aria-label","Role");active.type="checkbox";active.checked=true;active.setAttribute("aria-label","Active");c.append(node("h2","Assign team member"),user,r,node("label","Active membership"),active,node("button","Save membership"));c.addEventListener("submit",async e=>{e.preventDefault();try{await api(base()+"/membership",{user_id:user.value,new_role:r.value,active:active.checked});await load("clinic_users");}catch(err){showError(err);}});$("content").prepend(c);}
+function requestActions(kind){return (row,cell)=>{cell.append(button("View contact",async()=>{const details=await api(base()+`/requests/${kind}/${row.id}/detail`,{}),card=section("Contact — access audited");card.append(node("p",details.erased?"Contact erased.":`${details.name} · ${details.phone}`),button("Hide",()=>card.remove()));$("content").prepend(card);}));const select=picker(["new","contacted",...(kind==="appointment"?["confirmed_externally"]:[]),"closed","cancelled"].map(value=>[value,value]),row.status,"Status");cell.append(select,button("Update",async()=>{if(select.value==="confirmed_externally"&&!confirm("Has a human confirmed this outside the system?"))return;await api(base()+`/requests/${kind}/${row.id}/status`,{status:select.value});await load("requests");}));};}
+async function renderRequests(){for(const [tableName,label,kind] of [["appointment_requests","Appointment requests","appointment"],["callback_requests","Callback requests","callback"]]){$("content").append(node("h2",label),table(await api(base()+`/rows/${tableName}?offset=0`),requestActions(kind)));}}
+async function renderTest(){
+ const form=formCard("Ask the agent"),question=node("input"),submit=node("button","Ask");question.required=true;question.maxLength=500;question.placeholder="Is Dr Mahto available tomorrow?";form.append(question,node("p","Uses the latest published documents and active live updates."),submit);
+ for(const sample of ["Which doctors work here?","What qualification does Dr Mahto have?","Is the clinic open tomorrow?","Are walk-ins allowed today?"])form.append(button(sample,()=>{question.value=sample;form.requestSubmit();}));
+ form.addEventListener("submit",async event=>{event.preventDefault();submit.disabled=true;try{const result=await api(base()+"/test",{question:question.value});$("content").querySelector(".test-result")?.remove();const card=section("Answer"),sources=node("details");card.classList.add("test-result");card.append(node("p",result.answer),node("small",`Published version ${result.published_version} · ${result.result.retrieval}`));sources.append(node("summary","Sources and retrieval details"),node("pre",JSON.stringify(result.result.data.passages,null,2)));card.append(sources);$("content").append(card);}finally{submit.disabled=false;}});$("content").append(form);
+}
+async function renderSettings(){
+ const rows=await api(base()+"/settings"),row=rows[0],card=section("Clinic settings");card.append(node("p",`Language: ${row.default_language}`),node("p",row.greeting),node("p",row.emergency_message));$("content").append(card);if(!manager())return;
+ $("actions").append(button("Edit settings",()=>{const form=formCard("Edit settings"),greeting=node("textarea"),emergency=node("textarea"),fallback=node("textarea"),language=node("input"),supported=node("input");greeting.value=row.greeting;emergency.value=row.emergency_message;fallback.value=row.fallback_message;language.value=row.default_language;supported.value=(row.supported_languages||[]).join(", ");form.append(node("label","Greeting"),greeting,node("label","Emergency message"),emergency,node("label","Fallback message"),fallback,node("label","Default language"),language,node("label","Supported languages"),supported,node("button","Save and publish"));form.addEventListener("submit",async event=>{event.preventDefault();await api(base()+"/settings",{greeting:greeting.value,emergency_message:emergency.value,fallback_message:fallback.value,default_language:language.value,supported_languages:supported.value.split(",").map(value=>value.trim()).filter(Boolean)});await publishChanges();await load("settings");$("message").textContent="Settings published for new calls.";});$("content").replaceChildren(form);$("actions").replaceChildren(button("Back",()=>load("settings")));}));
+}
+async function load(key){
+ current=key;$("message").textContent="";$("title").textContent=pages[key][0];$("description").textContent=pages[key][1];$("breadcrumb").textContent=`${(role()||"clinic").toUpperCase()} WORKSPACE`;$("content").replaceChildren();$("actions").replaceChildren();
+ [...$("navigation").children].forEach((item,index)=>item.classList.toggle("active",Object.keys(pages)[index]===key));
+ if(key==="today")renderHome(await api(base()+"/today"));
+ if(key==="documents"){if(manager())$("actions").append(button("＋ Upload document",uploadEditor,""));renderDocuments(await api(base()+"/documents"));}
+ if(key==="temporary_notices"){if(manager())$("actions").append(button("＋ Add live update",()=>liveUpdateEditor({}),""));renderLiveUpdates(await api(base()+"/rows/temporary_notices?offset=0"));}
+ if(key==="test")await renderTest();if(key==="requests")await renderRequests();if(key==="call_sessions")$("content").append(table(await api(base()+"/rows/call_sessions?offset=0")));if(key==="settings")await renderSettings();
+}
 signedIn().catch(error=>{if(error.status!==401)showError(error);});

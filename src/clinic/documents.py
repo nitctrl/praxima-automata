@@ -55,7 +55,6 @@ _IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 _MARKUP = re.compile(r"[*_`~]+")
 _HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
-_BRACKET = re.compile(r"\([^)]*\)")
 
 
 class DocumentRejected(ValueError):
@@ -92,11 +91,6 @@ def tokens(text: str) -> list[str]:
         t for t in normalize(text).split()
         if t not in _STOPWORDS and t not in _TITLES and len(t) > 1
     ]
-
-
-def _person(name: str) -> str:
-    """Normalised personal name without bracketed notes or honorifics."""
-    return " ".join(w for w in normalize(_BRACKET.sub(" ", name)).split() if w not in _TITLES)
 
 
 def _clean(line: str) -> str:
@@ -249,33 +243,6 @@ def extract(filename: str, data: bytes) -> Extraction:
         sections=sections,
         warnings=tuple(warnings),
     )
-
-
-def tag_doctors(
-    sections: Sequence[DraftSection], doctors: Sequence[tuple[UUID, Sequence[str]]]
-) -> tuple[DraftSection, ...]:
-    """Attach a doctor to sections that clearly name exactly one doctor.
-
-    Full names are tried first: a shared surname alias must not cancel out a section that
-    names one doctor in full. Names are compared without honorifics or bracketed notes.
-    """
-    full = [(d, _person(names[0])) for d, names in doctors if names and len(_person(names[0])) > 2]
-    aliases = [
-        (d, _person(alias))
-        for d, names in doctors
-        for alias in names[1:]
-        if len(_person(alias)) > 2
-    ]
-    tagged = []
-    for section in sections:
-        if section.doctor_id is None:
-            haystack = f" {_person(f'{section.heading} {section.text}')} "
-            matches = {d for d, name in full if f" {name} " in haystack}
-            matches = matches or {d for d, name in aliases if f" {name} " in haystack}
-            if len(matches) == 1:
-                section = section.model_copy(update={"doctor_id": matches.pop()})
-        tagged.append(section)
-    return tuple(tagged)
 
 
 def excerpt(text: str, wanted: Sequence[str]) -> str:

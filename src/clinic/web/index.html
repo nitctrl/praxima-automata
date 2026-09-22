@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Reception · Clinic workspace</title>
-  <link rel="stylesheet" href="/assets/style.css?v=2"><link rel="stylesheet" href="/assets/ux.css?v=2"><script src="/assets/app.js?v=2" defer></script>
+  <link rel="stylesheet" href="/assets/style.css?v=3"><link rel="stylesheet" href="/assets/ux.css?v=3"><script src="/assets/app.js?v=3" defer></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -15,15 +15,14 @@
   </aside>
   <main>
     <header><div><p class="eyebrow" id="breadcrumb">A CALMER FRONT DESK</p><h1 id="title">Welcome to Reception</h1></div><button id="logout" class="secondary" hidden>Sign out</button></header>
-    <div class="notice"><strong>Controlled development</strong><span>Fictional test data only. Use Publish or Unpublish on Knowledge and Daily updates to change what new calls can use.</span></div>
+    <div class="notice"><strong>Two sources of truth</strong><span>Knowledge holds stable facts. Live Updates temporarily override them for new calls.</span></div>
     <p id="message" role="status" aria-live="polite"></p>
     <section id="login-panel" class="login-layout">
       <div class="welcome"><span class="pill">More time for your patients</span><h2>Everything your<br>front desk needs.<br><em>One quiet workspace.</em></h2><p>Keep clinic information accurate, review incoming requests, and give your team a clear picture of the day.</p><div class="principles"><span>✓ Clinic-scoped access</span><span>✓ Reviewed information</span><span>✓ Requests, not promises</span></div></div>
       <form id="login-form" class="card login-card"><p class="eyebrow">STAFF ACCESS</p><h2>Sign in to your clinic</h2><p>Use your clinic's Supabase Auth account. Access is assigned by your clinic owner.</p><label for="email">Email address</label><input id="email" type="email" autocomplete="username" required placeholder="you@clinic.example"><label for="password">Password</label><input id="password" type="password" autocomplete="current-password" required><button type="submit">Continue securely <span>→</span></button><small>No patient information is available before sign-in.</small></form>
     </section>
-    <section id="workspace" hidden><div class="toolbar"><p id="description"></p><div id="actions"></div></div><div id="content"></div><div class="pagination" id="pagination" hidden><button id="previous" class="secondary">← Previous</button><span id="page-number"></span><button id="next" class="secondary">Next →</button></div></section>
+    <section id="workspace" hidden><div class="toolbar"><p id="description"></p><div id="actions"></div></div><div id="content"></div></section>
     <footer>Reception workspace <span>Privacy first. Human confirmation always.</span></footer>
   </main>
-  <dialog id="editor"><form id="edit-form"><div class="dialog-head"><h2 id="edit-title">Edit draft</h2><button type="button" id="close-editor" class="secondary">Close</button></div><p>These changes are not live until a manager reviews and publishes the configuration.</p><div id="fields" class="form-grid"></div><p id="edit-error" role="alert"></p><button type="submit">Save draft</button></form></dialog>
 </body>
 </html>

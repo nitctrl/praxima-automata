@@ -35,36 +35,18 @@ from clinic.documents import (
     DocumentRejected,
     DraftSection,
     extract,
-    tag_doctors,
 )
-from clinic.knowledge import Query, StructuredKnowledge
 from clinic.privacy import PiiCipher
-from clinic.rag import HybridRetriever, snapshot_sections
-from clinic.snapshot import Snapshot, normalize
+from clinic.rag import HybridRetriever, active_quick_info, snapshot_sections
+from clinic.snapshot import Snapshot
 from clinic.vectors import VectorSearch
 
 ASSETS = Path(__file__).parent / "web"
 logger = logging.getLogger(__name__)
 EDIT_FIELDS: dict[str, str] = {
-    "doctors": "display_name,speciality,aliases,languages,short_public_bio,accepts_new_patients,"
-    "effective_from,effective_until,status",
-    "services": "name,aliases,short_approved_description,appointment_required,active,"
-    "effective_from,effective_until",
-    "locations": "name,address,landmark,directions,map_url,parking_information,status,"
-    "effective_from,effective_until",
-    "doctor_services": "doctor_id,service_id,current_fee,currency,"
-    "effective_from,effective_until,status",
-    "weekly_schedules": "doctor_id,location_id,day_of_week,start_time,end_time,availability_type,"
-    "status,effective_from,effective_until",
-    "special_date_schedules": "doctor_id,location_id,schedule_date,"
-    "start_time,end_time,publication_status",
-    "schedule_exceptions": "doctor_id,location_id,exception_date,status,start_time,end_time,"
-    "public_message,internal_note,publication_status",
     "temporary_notices": "location_id,doctor_id,service_id,notice_type,"
     "public_message,internal_note,"
     "starts_at,expires_at,priority,publication_status",
-    "approved_faqs": "category,canonical_question,alternative_phrasings,approved_answer,"
-    "effective_from,effective_until,publication_status",
 }
 READ_FIELDS = {table: "id," + fields for table, fields in EDIT_FIELDS.items()} | {
     "appointment_requests": "id,call_session_id,preferred_date,status,"
@@ -72,16 +54,9 @@ READ_FIELDS = {table: "id," + fields for table, fields in EDIT_FIELDS.items()} |
     "callback_requests": "id,call_session_id,requested_time,reason_category,status,created_at",
     "call_sessions": "id,started_at,ended_at,duration_seconds,disposition,failure_code,safety_flag,"
     "short_administrative_summary,configuration_version_id,is_test",
-    "configuration_versions": "id,version_number,status,schema_version,"
-    "published_at,source_version_id",
-    "clinic_users": "id,auth_user_id,role,status",
-    "usage_records": "id,call_session_id,llm_input_tokens,llm_output_tokens,"
-    "stt_seconds,tts_characters,"
-    "rate_version,recorded_at",
-    "audit_logs": "id,action,resource_type,resource_id,actor_id,occurred_at",
 }
 DOCUMENT_FIELDS = (
-    "id,title,original_filename,document_category,doctor_id,status,version,checksum,"
+    "id,title,original_filename,document_category,status,version,checksum,"
     "created_at,updated_at,published_at,extraction_warnings"
 )
 MANAGERS = {"owner", "manager"}
@@ -426,14 +401,6 @@ def create_app(
         row_id = values.pop("id", None)
         if not values or set(values) - set(EDIT_FIELDS[table].split(",")):
             raise HTTPException(400, "Unknown or protected fields.")
-        if row_id and table == "doctor_services":
-            raise HTTPException(403, "Fees are append-only; use a new effective interval.")
-        if table in {"doctors", "services"}:
-            name_key = "display_name" if table == "doctors" else "name"
-            if name_key in values:
-                if not isinstance(values[name_key], str):
-                    raise HTTPException(400, "Invalid name.")
-                values["normalized_name"] = normalize(values[name_key])
         if row_id:
             try:
                 row_id = str(UUID(row_id))
@@ -549,20 +516,6 @@ def create_app(
             logger.warning("Semantic index refresh failed; lexical search still serves calls")
             return None
 
-    async def clinic_doctors(session: WebSession, clinic: UUID) -> list[dict[str, Any]]:
-        rows = await backend.call(
-            "GET",
-            "/rest/v1/doctors",
-            token=session.token,
-            params={
-                "select": "id,display_name,aliases",
-                "clinic_id": f"eq.{clinic}",
-                "status": "eq.active",
-                "limit": "2000",
-            },
-        )
-        return list(rows or [])
-
     async def document(session: WebSession, clinic: UUID, document_id: UUID) -> dict[str, Any]:
         rows = await backend.call(
             "GET",
@@ -582,7 +535,7 @@ def create_app(
 
     @app.get("/api/clinics/{clinic}/documents")
     async def document_list(clinic: UUID, request: Request) -> Any:
-        session = await authorize(request, clinic, MANAGERS)
+        session = await authorize(request, clinic)
         return await backend.call(
             "GET",
             "/rest/v1/knowledge_documents",
@@ -632,11 +585,7 @@ def create_app(
             except ValueError:
                 raise HTTPException(400, "Invalid document to replace.") from None
             version, superseded = int(previous["version"]) + 1, previous["id"]
-        doctors = [
-            (UUID(row["id"]), [row["display_name"], *(row.get("aliases") or [])])
-            for row in await clinic_doctors(session, clinic)
-        ]
-        sections = tag_doctors(parsed.sections, doctors)
+        sections = parsed.sections
         created = await backend.call(
             "POST",
             "/rest/v1/knowledge_documents",
@@ -668,10 +617,9 @@ def create_app(
         """Save the reviewed wording. Nothing reaches callers until a version is published."""
         session = await authorize(request, clinic, MANAGERS)
         values = await data(request)
-        if set(values) - {"title", "document_category", "doctor_id", "sections"}:
+        if set(values) - {"title", "document_category", "sections"}:
             raise HTTPException(400, "Unsupported document field.")
-        allowed = {UUID(row["id"]) for row in await clinic_doctors(session, clinic)}
-        update: dict[str, Any] = {"reviewed_by": str(session.user_id)}
+        update: dict[str, Any] = {"reviewed_by": str(session.user_id), "doctor_id": None}
         if "sections" in values:
             try:
                 sections = [DraftSection.model_validate(row) for row in values["sections"]]
@@ -679,9 +627,10 @@ def create_app(
                 raise HTTPException(400, "A section is empty or too long.") from exc
             if len(sections) > 200 or sum(len(s.text) for s in sections) > 100000:
                 raise HTTPException(400, "Keep the reviewed text under the supported size.")
-            if any(s.doctor_id is not None and s.doctor_id not in allowed for s in sections):
-                raise HTTPException(400, "A section names a doctor from another clinic.")
-            update["sections"] = [s.model_dump(mode="json") for s in sections]
+            update["sections"] = [
+                s.model_copy(update={"doctor_id": None}).model_dump(mode="json")
+                for s in sections
+            ]
         if "title" in values:
             title = values["title"]
             if not isinstance(title, str) or not 1 <= len(title) <= 200:
@@ -691,17 +640,6 @@ def create_app(
             if values["document_category"] not in CATEGORIES:
                 raise HTTPException(400, "Choose a supported document type.")
             update["document_category"] = values["document_category"]
-        if "doctor_id" in values:
-            doctor = values["doctor_id"]
-            try:
-                chosen = UUID(doctor) if isinstance(doctor, str) and doctor else None
-            except ValueError:
-                raise HTTPException(400, "Choose a doctor from this clinic.") from None
-            if (chosen is None and doctor not in (None, "")) or (
-                chosen is not None and chosen not in allowed
-            ):
-                raise HTTPException(400, "Choose a doctor from this clinic.")
-            update["doctor_id"] = str(chosen) if chosen else None
         return await backend.call(
             "PATCH",
             "/rest/v1/knowledge_documents",
@@ -776,13 +714,13 @@ def create_app(
                 503, "Protected details unavailable; check key provisioning."
             ) from None
 
-    async def published_version(session: WebSession, clinic: UUID) -> tuple[UUID, Snapshot]:
+    async def published_version(session: WebSession, clinic: UUID) -> tuple[UUID, int, Snapshot]:
         rows = await backend.call(
             "GET",
             "/rest/v1/configuration_versions",
             token=session.token,
             params={
-                "select": "id,snapshot",
+                "select": "id,version_number,snapshot",
                 "clinic_id": f"eq.{clinic}",
                 "status": "eq.published",
                 "limit": "1",
@@ -792,18 +730,14 @@ def create_app(
             snapshot = Snapshot.model_validate(rows[0]["snapshot"])
             if snapshot.clinic_id != clinic:
                 raise ValueError
-            return UUID(str(rows[0]["id"])), snapshot
+            return UUID(str(rows[0]["id"])), int(rows[0]["version_number"]), snapshot
         except (ValueError, IndexError, KeyError):
             raise HTTPException(409, "Publish a valid version 2 configuration first.") from None
-
-    async def published(session: WebSession, clinic: UUID) -> Snapshot:
-        return (await published_version(session, clinic))[1]
 
     @app.get("/api/clinics/{clinic}/today")
     async def today(clinic: UUID, request: Request) -> Any:
         session = await authorize(request, clinic)
-        snapshot = await published(session, clinic)
-        knowledge = StructuredKnowledge(snapshot)
+        version_id, version_number, snapshot = await published_version(session, clinic)
         pending = {}
         for table in ("appointment_requests", "callback_requests"):
             pending[table] = await backend.call(
@@ -832,14 +766,12 @@ def create_app(
             },
         )
         return {
-            "status": knowledge.current_status().model_dump(mode="json"),
-            "doctors": knowledge.find_doctors(Query()).model_dump(mode="json"),
+            "version": {"id": str(version_id), "number": version_number},
+            "documents": sorted({row.document_title for row in snapshot.document_sections}),
+            "knowledge_chunks": len(snapshot_sections(snapshot)),
+            "live_updates": list(active_quick_info(snapshot)),
             "pending_requests": pending,
             "unresolved_calls": unresolved,
-            "doctor_hours": [
-                knowledge.availability(Query(doctor=str(doctor.id))).model_dump(mode="json")
-                for doctor in snapshot.doctors[:50]
-            ],
             "limit": 50,
         }
 
@@ -850,7 +782,7 @@ def create_app(
         text = values.get("question", "")
         if not isinstance(text, str) or len(text) > 500:
             raise HTTPException(400, "Use a short administrative question.")
-        version, snapshot = await published_version(session, clinic)
+        version, version_number, snapshot = await published_version(session, clinic)
         result = await HybridRetriever(snapshot, version, vectors).result(text)
         passages = result["data"]["passages"]
         answer = snapshot.fallback_message
@@ -870,6 +802,7 @@ def create_app(
             "action": "rag",
             "answer": answer,
             "generated": generated,
+            "published_version": version_number,
             "result": result,
         }
 

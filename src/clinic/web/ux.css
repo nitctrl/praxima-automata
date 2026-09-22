@@ -3,19 +3,6 @@
   gap: 14px;
   margin-top: 18px;
 }
-.item-card {
-  padding: 20px 22px;
-}
-.item-card h2 {
-  font-size: 17px;
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-.item-card p {
-  color: var(--muted);
-  font-size: 13px;
-  margin: 10px 0 15px;
-}
 .item-head {
   align-items: flex-start;
   display: flex;
@@ -45,10 +32,4 @@
 .status.draft {
   background: #f1eee5;
   color: #71633e;
-}
-.compact-form {
-  max-width: 760px;
-}
-.compact-form button {
-  margin-top: 20px;
 }
