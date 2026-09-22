@@ -3,21 +3,19 @@
 const $ = id => document.getElementById(id);
 const pages = {
   today: ["Today", "Published information for your front desk."],
+  documents: ["Knowledge", "Upload clinic documents, review the extracted text, and publish or unpublish them here."],
+  temporary_notices: ["Daily updates", "Publish short-lived changes such as doctor leave, changed hours, or service interruptions."],
   doctors: ["Doctors", "Manage public doctor information and effective dates."],
   services: ["Services", "Approved administrative service information."],
   doctor_services: ["Fees", "Append-only fee history. Overlapping effective intervals are rejected."],
   weekly_schedules: ["Weekly schedule", "Local clinic time. Split overnight hours into separate entries."],
   special_date_schedules: ["Special dates", "Date-specific schedules override weekly hours."],
   schedule_exceptions: ["Leave & exceptions", "Public messages and internal notes stay separate."],
-  temporary_notices: ["Quick daily info", "Add or expire short-lived facts rendered into the Jinja voice prompt and RAG index."],
   locations: ["Locations", "Approved addresses, directions and parking information."],
-  approved_faqs: ["Knowledge & review", "Approved question and answer wording for the phone assistant."],
-  documents: ["Clinic documents", "Upload .docx or .md background text, review every line, then approve it for the next publication."],
   appointment_requests: ["Appointment requests", "Requests need human follow-up. Nothing here guarantees an available slot."],
   callback_requests: ["Callbacks", "Minimal administrative callback requests. Contact details require audited access."],
   call_sessions: ["Calls", "Sanitized outcomes only. No recordings or transcripts."],
   test: ["Agent test", "Hybrid semantic + lexical RRF search over the published clinic knowledge."],
-  configuration_versions: ["Publish & history", "Review a preview before publishing. Existing calls retain their pinned version."],
   settings: ["Settings", "Language and approved messages are drafts until published."],
   clinic_users: ["Team", "Only owners can assign existing Auth users. You cannot change your own membership."],
   usage_records: ["Usage", "Raw provider units. Unpriced rates are not billing estimates; test calls are not production traffic."],
@@ -50,6 +48,15 @@ function base(){return `/api/clinics/${$("clinic").value}`;}
 function role(){return memberships.find(m=>m.clinic_id===$("clinic").value)?.role;}
 function manager(){return ["owner","manager"].includes(role());}
 async function api(path,body){const options={headers:{}};if(body!==undefined){options.method="POST";options.headers={"Content-Type":"application/json","X-CSRF-Token":csrf};options.body=JSON.stringify(body);}const res=await fetch(path,options);const value=await res.json();if(!res.ok){const error=new Error(typeof value.detail==="string"?value.detail:`Request failed (${res.status}).`);error.status=res.status;throw error;}return value;}
+async function publishChanges(){
+ await api(base()+"/preview",{});
+ return api(base()+"/publish",{});
+}
+async function changeAndPublish(path,next,previous){
+ await api(path,next);
+ try{return await publishChanges();}
+ catch(error){try{await api(path,previous);}catch(ignored){/* Preserve the original publish error. */}throw error;}
+}
 async function signedIn(){const me=await api("/api/me");csrf=me.csrf;memberships=me.memberships;$("login-panel").hidden=true;$("workspace").hidden=false;$("logout").hidden=false;$("clinic").replaceChildren();for(const m of memberships){const opt=node("option",m.clinics?.name||m.clinic_id);opt.value=m.clinic_id;$("clinic").append(opt);}$("clinic").disabled=false;$("navigation").replaceChildren();for(const [key,[label]] of Object.entries(pages))$("navigation").append(button(label,()=>{offset=0;return load(key);},"nav-item"));if(!memberships.length){$("message").textContent="No active clinic membership. Ask a clinic owner to assign access. Platform administrators may use Platform.";return;}await load("today");}
 $("login-form").addEventListener("submit",async e=>{e.preventDefault();$("message").textContent="";const submit=e.target.querySelector("button");submit.disabled=true;try{await api("/api/login",{email:$("email").value,password:$("password").value});$("password").value="";await signedIn();}catch(err){showError(err);}finally{submit.disabled=false;}});
 $("logout").addEventListener("click",async()=>{try{await api("/api/logout",{});}catch(err){showError(err);}finally{location.reload();}});
@@ -71,7 +78,7 @@ async function reviewDocument(id){
  const options=[["","Not about one doctor"],...people.map(p=>[p.id,p.display_name])];
  const form=node("form",undefined,"card"),title=node("input"),category=picker(categories.map(c=>[c,c]),doc.document_category,"Document type"),doctor=picker(options,doc.doctor_id||"","Doctor");
  title.value=doc.title||"";title.required=true;title.maxLength=200;title.setAttribute("aria-label","Document title");
- form.append(node("h2","Review before approving"),node("p",`${doc.original_filename} · version ${doc.version} · ${doc.status}`),node("label","Title"),title,node("label","Document type"),category,node("label","About which doctor"),doctor);
+ form.append(node("h2","Review document"),node("p",`${doc.original_filename} · version ${doc.version} · ${doc.status}`),node("label","Title"),title,node("label","Document type"),category,node("label","About which doctor"),doctor);
  for(const warning of doc.extraction_warnings||[])form.append(node("p",`Note: ${warning}`));
  const edited=(doc.sections||[]).map(section=>{
   const block=node("div",undefined,"table-wrap"),heading=node("input"),text=node("textarea"),who=picker(options,section.doctor_id||"","Section doctor"),drop=node("input");
@@ -86,7 +93,11 @@ async function reviewDocument(id){
  form.addEventListener("submit",async e=>{
   e.preventDefault();
   const sections=edited.filter(row=>!row.drop.checked&&row.text.value.trim()).map((row,position)=>({id:row.section.id,position,heading:row.heading.value,text:row.text.value.trim(),doctor_id:row.who.value||null,keywords:row.section.keywords||[]}));
-  try{await api(base()+`/documents/${id}`,{title:title.value,document_category:category.value,doctor_id:doctor.value||null,sections});await load("documents");$("message").textContent="Reviewed text saved. Approve it, then publish a configuration version.";}catch(err){showError(err);}
+  try{
+   await api(base()+`/documents/${id}`,{title:title.value,document_category:category.value,doctor_id:doctor.value||null,sections});
+   const result=doc.status==="published"?await publishChanges():null;await load("documents");
+   $("message").textContent=result?`Published document updated. ${result.indexed??0} knowledge chunks indexed.`:"Document saved. Click Publish when it is ready for the agent.";
+  }catch(err){showError(err);}
  });
  $("content").replaceChildren(form);$("actions").replaceChildren(button("Back to documents",()=>load("documents")));$("pagination").hidden=true;
 }
@@ -96,9 +107,70 @@ function uploadForm(){
  form.append(node("h2","Upload background text"),node("p","Word (.docx) or Markdown (.md), up to 5 MB. Images, macros and tracked-change history are ignored."),file,category,node("button","Upload for review"));
  form.addEventListener("submit",async e=>{
   e.preventDefault();const chosen=file.files[0];if(!chosen)return;
-  try{const created=await upload(chosen,category.value);await reviewDocument(created.id);$("message").textContent="Uploaded. Nothing reaches callers until you approve and publish.";}catch(err){showError(err);}
+  try{const created=await upload(chosen,category.value);await reviewDocument(created.id);$("message").textContent="Uploaded. Review the text, save it, then click Publish.";}catch(err){showError(err);}
  });
  return form;
+}
+function localDateTime(value){
+ if(!value)return "";
+ const date=new Date(value),shifted=new Date(date.getTime()-date.getTimezoneOffset()*60000);
+ return shifted.toISOString().slice(0,16);
+}
+function dailyUpdateEditor(row={}){
+ const form=node("form",undefined,"card compact-form"),message=node("textarea"),start=node("input"),end=node("input"),priority=node("input");
+ const now=new Date(),tomorrow=new Date(now.getTime()+24*60*60*1000);
+ message.required=true;message.maxLength=1000;message.value=row.public_message||"";message.placeholder="Example: Dr Sharma is unavailable today after 4 PM.";
+ start.type="datetime-local";start.required=true;start.value=localDateTime(row.starts_at||now);
+ end.type="datetime-local";end.required=true;end.value=localDateTime(row.expires_at||tomorrow);
+ priority.type="number";priority.min="0";priority.max="100";priority.value=row.priority??50;
+ form.append(node("h2",row.id?"Edit daily update":"Add daily update"),node("p","Keep this short and factual. It is added to the agent's instructions and searchable knowledge after you publish it."),node("label","What should patients know?"),message,node("label","Starts"),start,node("label","Expires"),end,node("label","Priority"),priority,node("button","Save update"));
+ form.addEventListener("submit",async e=>{
+  e.preventDefault();
+  const startsAt=new Date(start.value),expiresAt=new Date(end.value);
+  if(expiresAt<=startsAt){$("message").textContent="Expiry must be after the start time.";return;}
+  const values={notice_type:row.notice_type||"information",public_message:message.value.trim(),internal_note:row.internal_note||"",starts_at:startsAt.toISOString(),expires_at:expiresAt.toISOString(),priority:Number(priority.value),publication_status:row.publication_status||"draft",location_id:row.location_id||null,doctor_id:row.doctor_id||null,service_id:row.service_id||null};
+  if(row.id)values.id=row.id;
+  try{
+   await api(base()+"/rows/temporary_notices",values);const result=row.publication_status==="published"?await publishChanges():null;await load("temporary_notices");
+   $("message").textContent=result?`Published daily update changed. ${result.indexed??0} knowledge chunks indexed.`:"Daily update saved. Click Publish when it is ready.";
+  }catch(err){showError(err);}
+ });
+ $("content").replaceChildren(form);$("actions").replaceChildren(button("Back to daily updates",()=>load("temporary_notices")));$("pagination").hidden=true;
+}
+function itemStatus(published){return node("span",published?"Published":"Not published",published?"status published":"status draft");}
+function renderDailyUpdates(rows){
+ const list=node("div",undefined,"item-list");
+ if(!rows.length){list.append(node("div","No daily updates yet.","empty"));$("content").append(list);return;}
+ for(const row of rows){
+  const published=row.publication_status==="published",item=node("section",undefined,"card item-card"),head=node("div",undefined,"item-head"),actions=node("div",undefined,"item-actions");
+  head.append(node("h2",row.public_message),itemStatus(published));
+  item.append(head,node("p",`${new Date(row.starts_at).toLocaleString()} — ${new Date(row.expires_at).toLocaleString()}`));
+  if(manager())actions.append(button("Edit",()=>dailyUpdateEditor(row)));
+  if(manager())actions.append(button(published?"Unpublish":"Publish",async()=>{
+   if(!confirm(`${published?"Unpublish":"Publish"} this daily update?`))return;
+   const path=base()+"/rows/temporary_notices",result=await changeAndPublish(path,{id:row.id,publication_status:published?"archived":"published"},{id:row.id,publication_status:row.publication_status});await load("temporary_notices");
+   $("message").textContent=`Daily update ${published?"unpublished":"published"}. ${result.indexed??0} knowledge chunks indexed.`;
+  },published?"secondary":""));
+  item.append(actions);list.append(item);
+ }
+ $("content").append(list);
+}
+function renderDocuments(rows){
+ const list=node("div",undefined,"item-list");
+ if(!rows.length){list.append(node("div","No documents yet. Upload a Markdown or Word document above.","empty"));$("content").append(list);return;}
+ for(const row of rows){
+  const published=row.status==="published",item=node("section",undefined,"card item-card"),head=node("div",undefined,"item-head"),actions=node("div",undefined,"item-actions");
+  head.append(node("h2",row.title||row.original_filename||"Untitled document"),itemStatus(published));
+  item.append(head,node("p",`${row.original_filename||"Uploaded document"} · ${String(row.document_category||"other").replaceAll("_"," ")}`));
+  actions.append(button("Review",()=>reviewDocument(row.id)));
+  actions.append(button(published?"Unpublish":"Publish",async()=>{
+   if(!confirm(`${published?"Unpublish":"Publish"} this document for the dashboard test and phone agent?`))return;
+   const path=base()+`/documents/${row.id}/status`,result=await changeAndPublish(path,{status:published?"archived":"published"},{status:row.status});await load("documents");
+   $("message").textContent=`Document ${published?"unpublished":"published"}. ${result.indexed??0} knowledge chunks indexed for search.`;
+  },published?"secondary":""));
+  item.append(actions);list.append(item);
+ }
+ $("content").append(list);
 }
 function summaryCard(title){const c=node("section",undefined,"card");c.append(node("h2",title));return c;}
 function hoursText(hours){return (hours||[]).map(h=>`${h.start.slice(11,16)}–${h.end.slice(11,16)}`).join(", ");}
@@ -152,11 +224,13 @@ async function load(key){current=key;$("message").textContent="";$("title").text
  if(key==="documents"){
   if(!manager()){$("content").append(node("div","Only clinic owners and managers can review uploaded documents.","empty"));return;}
   $("content").append(uploadForm());
-  table(await api(base()+"/documents"),(row,td)=>{
-   td.append(button("Review",()=>reviewDocument(row.id)));
-   if(row.status!=="published")td.append(button("Approve for publication",async()=>{if(!confirm("Approve this reviewed text? It reaches callers only after you publish a configuration version."))return;await api(base()+`/documents/${row.id}/status`,{status:"published"});await load("documents");$("message").textContent="Approved. Publish a configuration version to reach new calls.";}));
-   else td.append(button("Withdraw",async()=>{await api(base()+`/documents/${row.id}/status`,{status:"archived"});await load("documents");}));
-  });
+  renderDocuments(await api(base()+"/documents"));
+  return;
+ }
+ if(key==="temporary_notices"){
+  const rows=await api(base()+"/rows/temporary_notices?offset=0");
+  if(manager())$("actions").append(button("＋ Add daily update",()=>dailyUpdateEditor({}),""));
+  renderDailyUpdates(rows);
   return;
  }
  const rows=await api(base()+`/rows/${key}?offset=${offset}`);
@@ -165,14 +239,6 @@ async function load(key){current=key;$("message").textContent="";$("title").text
  if(key==="clinic_users"&&role()==="owner")$("actions").append(button("Assign existing user",()=>membershipEditor()));
  table(rows,(row,td)=>{
    if(fields[key]&&manager()&&key!=="doctor_services")td.append(button("Edit draft",()=>edit(row)));
-   if(key==="temporary_notices"&&manager()){
-    const included=row.publication_status==="published";
-    td.append(button(included?"Remove from next publish":"Include in next publish",async()=>{
-     await api(base()+"/rows/temporary_notices",{id:row.id,publication_status:included?"archived":"published"});
-     await load("temporary_notices");
-     $("message").textContent="Quick daily information updated. Publish the configuration to apply it to calls.";
-    }));
-   }
    if(key==="configuration_versions"&&manager()&&[2,3].includes(row.schema_version)&&["published","superseded"].includes(row.status))td.append(button("Preview rollback",()=>preview(row.id)));
    if(["appointment_requests","callback_requests"].includes(key)&&["owner","manager","receptionist"].includes(role())){const kind=key==="appointment_requests"?"appointment":"callback";td.append(button("View contact (audited)",async()=>{const details=await api(base()+`/requests/${kind}/${row.id}/detail`,{});$("content").querySelector(".sensitive")?.remove();const c=card("Contact — authorized access recorded",details);c.classList.add("sensitive");c.append(button("Hide details",()=>c.remove()));$("content").prepend(c);}));const status=node("select");status.setAttribute("aria-label","Request status");for(const s of ["new","contacted",...(kind==="appointment"?["confirmed_externally"]:[]),"closed","cancelled"]){const opt=node("option",s);opt.selected=row.status===s;status.append(opt);}td.append(status,button("Update status",async()=>{if(status.value==="confirmed_externally"&&!confirm("Has a human confirmed this booking outside this system?"))return;await api(base()+`/requests/${kind}/${row.id}/status`,{status:status.value});await load(current);}));}
  });$("pagination").hidden=false;$("previous").disabled=offset===0;$("next").disabled=rows.length<50;$("page-number").textContent=`Page ${offset/50+1}`;
