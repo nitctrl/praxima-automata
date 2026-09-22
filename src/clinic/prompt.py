@@ -1,6 +1,8 @@
 """Jinja-rendered voice policy with published quick daily information."""
 
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
@@ -25,4 +27,5 @@ def render_prompt(snapshot: Snapshot) -> str:
         supported_languages=snapshot.supported_languages,
         emergency_message=snapshot.emergency_message,
         quick_info=active_quick_info(snapshot),
+        current_local_time=datetime.now(ZoneInfo(snapshot.timezone)).isoformat(timespec="minutes"),
     ).strip()

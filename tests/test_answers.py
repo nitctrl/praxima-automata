@@ -37,6 +37,8 @@ def test_grounded_answer_prompt(content, monkeypatch):  # noqa: F811
         [{"source": "clinic.md", "heading": "Timings", "text": "Doctor hours only."}],
     ))
     assert response == "The published text is insufficient."
-    assert "date or date range" in captured["system"]
+    compact_system = " ".join(captured["system"].split())
+    assert "specific date or date range" in compact_system
+    assert "Doctor working hours do not prove" in compact_system
     assert "Doctor hours only" in captured["messages"][0]["content"]
     assert captured["client"]["api_key"] == "private-test-key"

@@ -28,7 +28,7 @@ def test_only_unified_rag_tool_is_attached(monkeypatch):
     assert "Clinic knowledge is unavailable" in captured["instructions"]
     assert captured["min_endpointing_delay"] == 0.45
     assert captured["max_endpointing_delay"] == 1.2
-    assert agent.anthropic.LLM.call_args.kwargs["temperature"] == 0.7
+    assert agent.anthropic.LLM.call_args.kwargs["temperature"] == 0
 
 
 def test_no_clinic_orchestration_or_custom_speech_imported_by_agent():

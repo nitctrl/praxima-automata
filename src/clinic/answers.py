@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
-from datetime import datetime
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from anthropic import AsyncAnthropic
 
@@ -26,13 +24,9 @@ def anthropic_answerer(api_key: str, model: str) -> GroundedAnswerer:
             f"Heading: {row.get('heading', '')}\n{row.get('text', '')}"
             for row in passages
         )
-        local_now = datetime.now(ZoneInfo(snapshot.timezone)).isoformat(timespec="minutes")
         system = render_prompt(snapshot) + (
             "\n\nThis is a dashboard test, so the relevant passages are already supplied. "
-            "Answer the exact question directly in plain language. Do not copy the whole passage. "
-            "For a date or date range, determine the weekday and distinguish being open at a "
-            "specific time from being continuously open throughout a range. If the passages do "
-            "not contain enough information, say so clearly."
+            "Do not call a tool; answer from those supplied passages."
         )
         async with AsyncAnthropic(api_key=api_key, timeout=20, max_retries=1) as client:
             response = await client.messages.create(
@@ -43,7 +37,6 @@ def anthropic_answerer(api_key: str, model: str) -> GroundedAnswerer:
                 messages=[{
                     "role": "user",
                     "content": (
-                        f"Current clinic-local time: {local_now}\n"
                         f"Question: {question}\n\nRetrieved passages:\n{context}"
                     ),
                 }],

@@ -72,7 +72,7 @@ class VoiceAgent(Agent):
             llm=anthropic.LLM(
                 model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
                 api_key=os.environ.get("ANTHROPIC_API_KEY"),
-                temperature=0.7,
+                temperature=0,
             ),
 
             # ── TTS: Sarvam Bulbul v3 ─────────────────────────────

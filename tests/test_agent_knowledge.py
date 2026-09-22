@@ -38,6 +38,9 @@ def test_agent_exposes_one_rag_tool(knowledge):
     tools = knowledge.function_tools()
     assert len(tools) == 1
     assert "search_clinic_knowledge" in knowledge.instructions
+    assert "specific date or date range" in knowledge.instructions
+    assert "Current clinic-local time:" in knowledge.instructions
+    assert "do not shorten or reinterpret" in knowledge.instructions
 
 
 def test_only_documents_are_stable_rag_knowledge(content):  # noqa: F811
