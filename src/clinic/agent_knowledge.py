@@ -50,10 +50,10 @@ class AgentKnowledge:
 
     @function_tool()
     async def search_clinic_knowledge(self, question: str) -> dict[str, object]:
-        """Hybrid-search all published clinic facts and reviewed uploaded documents.
+        """Hybrid-search reviewed published documents and active daily updates.
 
         Call this for every clinic-information question, including doctors, availability,
-        hours, fees, locations, services, FAQs, qualifications, and daily changes.
+        hours, fees, locations, services, qualifications, and daily changes.
         """
         if self.retriever is None:
             return {"status": "unavailable", "data": {"passages": []}}

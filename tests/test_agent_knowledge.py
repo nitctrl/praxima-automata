@@ -40,16 +40,13 @@ def test_agent_exposes_one_rag_tool(knowledge):
     assert "search_clinic_knowledge" in knowledge.instructions
 
 
-def test_structured_forms_and_uploaded_documents_share_one_search(content):  # noqa: F811
+def test_only_documents_are_stable_rag_knowledge(content):  # noqa: F811
     knowledge = AgentKnowledge(Snapshot.model_validate(with_document(content)), uuid4())
 
     async def exercise():
-        doctors = await knowledge.search_clinic_knowledge("which doctors work here")
-        assert "Dr Anaya Sharma" in str(doctors)
-        hours = await knowledge.search_clinic_knowledge("Anaya Sharma Monday working hours")
-        assert "09:00" in str(hours) and "20:00" in str(hours)
-        fee = await knowledge.search_clinic_knowledge("consultation price for Anaya")
-        assert "450.00 INR" in str(fee)
+        removed = await knowledge.search_clinic_knowledge("Tell me about Dr Sharma")
+        assert removed["status"] == "unavailable"
+        assert "Published clinic information" not in str(removed)
         qualification = await knowledge.search_clinic_knowledge("Mahto qualification")
         assert "MBBS" in str(qualification)
 
@@ -73,6 +70,8 @@ def test_jinja_prompt_includes_active_quick_daily_info(content):  # noqa: F811
     knowledge = AgentKnowledge(Snapshot.model_validate(payload), uuid4())
     assert "Quick daily information currently in force" in knowledge.instructions
     assert "Reception closes early today" in knowledge.instructions
+    result = asyncio.run(knowledge.search_clinic_knowledge("Does reception close early today?"))
+    assert "Reception closes early today" in str(result)
 
 
 def test_other_clinic_rejected(content):  # noqa: F811

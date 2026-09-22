@@ -88,7 +88,10 @@ class Extraction(BaseModel):
 def tokens(text: str) -> list[str]:
     # normalize() already separates words and keeps combining marks, so Devanagari words
     # survive intact; a letter-class regex would split them at every matra.
-    return [t for t in normalize(text).split() if t not in _STOPWORDS and len(t) > 1]
+    return [
+        t for t in normalize(text).split()
+        if t not in _STOPWORDS and t not in _TITLES and len(t) > 1
+    ]
 
 
 def _person(name: str) -> str:
@@ -365,10 +368,31 @@ class DocumentIndex:
             return []
         lexical = [section for _, section in self._lexical(wanted, doctor_id, topic)]
         known = {s.id: s for s in self.sections}
+        words = normalize(question).split()
+        named = {
+            words[position + 1]
+            for position, word in enumerate(words[:-1])
+            if word in {"dr", "drs", "डॉ", "डा"}
+        }
+        terms = {
+            section.id: counts
+            for section, counts in zip(self.sections, self._terms, strict=True)
+        }
+
+        def matches_named_subject(identifier: UUID) -> bool:
+            counts = terms[identifier]
+            return not named or any(
+                counts.get(word) or (len(word) >= 5 and counts.get("~" + word[:5]))
+                for word in named
+            )
+
+        if named:
+            lexical = [section for section in lexical if matches_named_subject(section.id)]
         nearest = [
             known[i]
             for i in dict.fromkeys(semantic)
             if i in known
+            and matches_named_subject(i)
             and (doctor_id is None or known[i].doctor_id in (None, doctor_id))
         ][:5]
         # Reciprocal rank fusion: either retriever can carry a section, neither can dominate.

@@ -146,3 +146,10 @@ def test_rrf_fuses_lexical_and_semantic_rankings():
     result = index.search("clinic founding vision", semantic=[semantic.id, both.id], limit=3)
     assert result[0][1].id == both.id
     assert {row.id for _, row in result} == {lexical.id, semantic.id, both.id}
+
+
+def test_named_doctor_must_exist_even_when_semantic_search_returns_another_doctor():
+    mahto = section("Dr Suresh Kumar Mahto has an MBBS qualification.")
+    index = DocumentIndex([mahto])
+    assert index.search("Tell me about Dr Sharma", semantic=[mahto.id]) == []
+    assert index.search("What qualification does Dr Suresh have?", semantic=[mahto.id])
