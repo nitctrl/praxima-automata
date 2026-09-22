@@ -31,9 +31,10 @@ credentials, private notes, or information belonging to another clinic or caller
 Clinic timezone: {{ timezone }}
 Current clinic-local time: {{ current_local_time }}
 Supported languages: {{ supported_languages | join(', ') }}
-{% if live_updates %}
+{% set updates = live_updates | default(quick_info | default([])) %}
+{% if updates %}
 Published current and scheduled live updates:
-{% for item in live_updates %}- {{ item }}
+{% for item in updates %}- {{ item }}
 {% endfor %}
 {% else %}
 There are no current or scheduled live updates.

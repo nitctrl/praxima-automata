@@ -50,7 +50,7 @@ class AgentKnowledge:
 
     @function_tool()
     async def search_clinic_knowledge(self, question: str) -> dict[str, object]:
-        """Hybrid-search reviewed published documents and active daily updates.
+        """Hybrid-search reviewed documents and current or scheduled live updates.
 
         Call this for every clinic-information question, including doctors, availability,
         hours, fees, locations, services, qualifications, and daily changes.

@@ -7,6 +7,7 @@ import pytest
 from test_structured_knowledge import content  # noqa: F401
 
 from clinic.agent_knowledge import CLINIC, AgentKnowledge, load_agent_knowledge
+from clinic.prompt import ENVIRONMENT
 from clinic.resolver import ClinicUnavailable
 from clinic.snapshot import Snapshot
 
@@ -44,6 +45,18 @@ def test_agent_exposes_one_rag_tool(knowledge):
     assert "do not shorten or reinterpret" in knowledge.instructions
     assert "overrides conflicting document text" in knowledge.instructions
     assert "open/closed question has no date or time" in knowledge.instructions
+
+
+def test_prompt_template_accepts_previous_worker_variable_names():
+    rendered = ENVIRONMENT.get_template("agent_system_prompt.j2").render(
+        clinic_name="Test clinic",
+        timezone="Asia/Kolkata",
+        supported_languages=["en-IN"],
+        emergency_message="Call emergency services.",
+        current_local_time="2026-09-22T18:00+05:30",
+        quick_info=["Reception closes early."],
+    )
+    assert "Reception closes early" in rendered
 
 
 def test_only_documents_are_stable_rag_knowledge(content):  # noqa: F811
