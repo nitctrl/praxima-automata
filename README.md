@@ -35,7 +35,7 @@ use fictional inputs only. This is not a production medical service.
 
 The new backend supports pinned call sessions, confirmed request collection,
 encrypted PII, safety routing, usage units and scoped staff workflows. The
-FastAPI/Jinja dashboard supports doctor/service/schedule/notice authoring, requests,
+FastAPI dashboard API supports doctor/service/schedule/notice authoring, requests,
 calls and explicit publish/rollback. A separate **console-only fictional test**
 now binds actual speech/turn events, bilingual readbacks and provider metrics.
 The separate fictional SIP pilot is inactive; real-clinic rollout and verified
@@ -43,8 +43,11 @@ transfers remain gated, not production-ready.
 See [development activation](docs/development-activation.md) for private account
 setup, publication requirements and the local voice test's limitations.
 
-Start the local dashboard with `uv run python scripts/dashboard.py`, then open
-http://127.0.0.1:8080. Sign-in requires a Supabase Auth account with a clinic
+This project is backend only. Start the dashboard API with
+`uv run python scripts/dashboard.py` (http://127.0.0.1:8080, JSON only). The staff UI is a
+separate Next.js app in `../frontend` that proxies `/api/*` here; see
+`../frontend/FRONTEND_ARCHITECTURE.md`. Set `CLINIC_DASHBOARD_ORIGIN` to the frontend's
+origin (`http://127.0.0.1:3000` locally). Sign-in requires a Supabase Auth account with a clinic
 membership; there is no seeded login. See [setup, permissions, verification and
 remaining activation gates](docs/phase-3-4-sessions-dashboard.md).
 

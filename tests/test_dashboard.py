@@ -85,13 +85,14 @@ def login(client):
     return {"Origin": CONFIG.origin, "X-CSRF-Token": res.json()["csrf"]}
 
 
-def test_anonymous_shell_and_protected_api(web):
+def test_api_only_and_protected(web):
     client, _ = web
-    page = client.get("/")
-    assert page.status_code == 200
-    assert "Sign in to your clinic" in page.text
-    assert "frame-ancestors 'none'" in page.headers["content-security-policy"]
-    assert page.headers["cache-control"] == "no-store"
+    assert client.get("/").status_code == 404
+    assert client.get("/assets/app.js").status_code == 404
+    health = client.get("/health")
+    assert health.status_code == 200
+    assert "frame-ancestors 'none'" in health.headers["content-security-policy"]
+    assert health.headers["cache-control"] == "no-store"
     assert client.get(f"/api/clinics/{CLINIC}/rows/doctors").status_code == 401
     assert client.get("/api/me", headers={"Host": "evil.example"}).status_code == 400
 

@@ -1,4 +1,7 @@
-"""Small server-rendered dashboard with Supabase-verified bearer sessions.
+"""Staff dashboard JSON API with Supabase-verified bearer sessions.
+
+The UI is a separate Next.js app (../frontend) that proxies /api/* to this server,
+so the browser sees one origin: set CLINIC_DASHBOARD_ORIGIN to the frontend's origin.
 
 The server never uses migration/service-role credentials. Supabase Auth verifies
 the user on every protected request; PostgREST additionally validates the JWT and
@@ -15,16 +18,13 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -41,7 +41,6 @@ from clinic.rag import HybridRetriever, active_quick_info, snapshot_sections
 from clinic.snapshot import Snapshot
 from clinic.vectors import VectorSearch
 
-ASSETS = Path(__file__).parent / "web"
 logger = logging.getLogger(__name__)
 EDIT_FIELDS: dict[str, str] = {
     "temporary_notices": "location_id,doctor_id,service_id,notice_type,"
@@ -98,7 +97,7 @@ class WebSettings:
         return cls(
             os.environ["SUPABASE_URL"].rstrip("/"),
             os.environ["SUPABASE_PUBLISHABLE_KEY"],
-            os.environ.get("CLINIC_DASHBOARD_ORIGIN", "http://127.0.0.1:8080").rstrip("/"),
+            os.environ.get("CLINIC_DASHBOARD_ORIGIN", "http://127.0.0.1:3000").rstrip("/"),
         )
 
 
@@ -171,7 +170,6 @@ def create_app(
     buckets: dict[str, tuple[float, int]] = {}
     previews: dict[tuple[str, UUID], dict[str, Any]] = {}
     vectors = VectorSearch.from_environment()
-    templates = Environment(loader=FileSystemLoader(ASSETS), autoescape=select_autoescape())
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
@@ -185,7 +183,6 @@ def create_app(
     hostname = urlsplit(config.origin).hostname
     assert hostname is not None  # WebSettings rejects an origin without a hostname.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=[hostname])
-    app.mount("/assets", StaticFiles(directory=ASSETS), name="assets")
 
     def rate(key: str, maximum: int) -> None:
         now = time.monotonic()
@@ -233,10 +230,8 @@ def create_app(
                 "X-Content-Type-Options": "nosniff",
                 "Referrer-Policy": "no-referrer",
                 "X-Frame-Options": "DENY",
-                "Content-Security-Policy": "default-src 'self'; script-src 'self'; "
-                "style-src 'self'; "
-                "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; "
-                "base-uri 'none'; form-action 'self'",
+                # JSON only: nothing may render or execute. The frontend sets its own CSP.
+                "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
                 "Permissions-Policy": "microphone=(), camera=(), geolocation=()",
             }
         )
@@ -293,10 +288,6 @@ def create_app(
 
     async def rpc(session: WebSession, name: str, values: dict[str, Any]) -> Any:
         return await backend.call("POST", f"/rest/v1/rpc/{name}", token=session.token, body=values)
-
-    @app.get("/", response_class=HTMLResponse)
-    async def home() -> str:
-        return templates.get_template("index.html").render()
 
     @app.get("/health")
     async def health() -> dict[str, str]:

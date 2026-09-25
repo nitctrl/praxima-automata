@@ -85,7 +85,7 @@ knowledge base lives in the worker's memory for the duration of the call.
 | Database | Supabase Postgres, accessed with `psycopg` (async pool), no ORM |
 | Auth (dashboard) | Supabase Auth, publishable key only |
 | Vector search (optional) | Qdrant + `fastembed` (`BAAI/bge-small-en-v1.5`) |
-| Dashboard | FastAPI + Jinja2 + plain HTML/CSS/JS (`src/clinic/web/`) |
+| Dashboard | FastAPI JSON API; UI is a separate Next.js app (`../frontend`) |
 | Telephony | Plivo PSTN -> LiveKit SIP (`sip/dispatch-rule.json`) |
 
 ---
@@ -457,7 +457,7 @@ document -> preview -> publish -> then call.**
 | `src/clinic/snapshot.py` | Typed, validated, immutable snapshot model |
 | `src/clinic/db.py`, `settings.py` | Restricted runtime DB pool and DSN validation |
 | `src/clinic/publication.py` | Preview / publish / rollback service |
-| `src/clinic/dashboard.py`, `src/clinic/web/` | Staff dashboard backend and UI |
+| `src/clinic/dashboard.py` | Staff dashboard JSON API (UI lives in `../frontend`) |
 | `src/clinic/answers.py` | Gemini grounded answerer for dashboard Agent test |
 | `src/clinic/sip_test.py`, `resolver.py` | SIP ingress check, called-number resolution |
 | `scripts/database.py` | Migrate / seed / provision-runtime / status |

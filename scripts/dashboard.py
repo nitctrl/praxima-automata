@@ -1,4 +1,4 @@
-"""Run one loopback dashboard worker; production requires an HTTPS reverse proxy."""
+"""Run one loopback dashboard API worker; the Next.js frontend proxies /api/* to it."""
 
 import os
 from pathlib import Path
