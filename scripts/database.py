@@ -16,8 +16,8 @@ import psycopg
 from dotenv import dotenv_values
 from psycopg import sql
 
-from clinic.development import seed_fictional_clinics
-from clinic.settings import ConfigurationError, DatabaseSettings
+from praxima.dev.development import seed_fictional_clinics
+from praxima.shared.db.settings import ConfigurationError, DatabaseSettings
 
 ROOT = Path(__file__).resolve().parents[1]
 

@@ -20,17 +20,17 @@ from livekit.agents import llm, stt, tts, vad
 from livekit.agents.metrics import LLMMetrics, STTMetrics, TTSMetrics, VADMetrics
 from test_structured_knowledge import content as knowledge_content  # noqa: F401
 
-from clinic import sessions
-from clinic.dev_conversation import DevelopmentConversation, Reply
-from clinic.dev_voice import DevelopmentVoiceAgent
-from clinic.fallback_audio import FALLBACK, frames, load_audio
-from clinic.knowledge import StructuredKnowledge
-from clinic.privacy import PiiCipher
-from clinic.resolver import ClinicScope
-from clinic.safety import classify, response
-from clinic.sessions import CallContext, CallOrchestrator
-from clinic.snapshot import Snapshot
-from clinic.usage import UsageCollector, usage_event
+from praxima.dev.dev_conversation import DevelopmentConversation, Reply
+from praxima.dev.dev_voice import DevelopmentVoiceAgent
+from praxima.dev.fallback_audio import FALLBACK, frames, load_audio
+from praxima.modules.agents.application.resolver import ClinicScope
+from praxima.modules.catalog.domain.knowledge import StructuredKnowledge
+from praxima.modules.engagement.application import sessions
+from praxima.modules.engagement.application.sessions import CallContext, CallOrchestrator
+from praxima.modules.releases.domain.snapshot import Snapshot
+from praxima.runtime.policy.safety import classify, response
+from praxima.runtime.usage import UsageCollector, usage_event
+from praxima.shared.security.privacy import PiiCipher
 
 NOW = datetime(2026, 9, 21, 5, tzinfo=timezone.utc)
 PHONE = "+12025550109"

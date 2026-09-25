@@ -14,17 +14,17 @@ import pytest
 from psycopg import sql
 from psycopg.rows import dict_row
 
-from clinic.db import RuntimeDatabase
-from clinic.development import fixture_id
-from clinic.resolver import (
+from praxima.dev.development import fixture_id
+from praxima.modules.agents.application.resolver import (
     ClinicResolver,
     ClinicUnavailable,
     ConfigurationRepository,
     InboundDestination,
     PostgresResolutionRepository,
 )
-from clinic.settings import ConfigurationError
-from clinic.staff import Forbidden, StaffRepository
+from praxima.modules.iam.infrastructure.staff import Forbidden, StaffRepository
+from praxima.shared.db.pool import RuntimeDatabase
+from praxima.shared.db.settings import ConfigurationError
 
 pytestmark = pytest.mark.integration
 A, B = fixture_id("A"), fixture_id("B")

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from clinic.settings import ConfigurationError
+from praxima.shared.db.settings import ConfigurationError
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/database.py"
 SPEC = importlib.util.spec_from_file_location("database_script", SCRIPT)

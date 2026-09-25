@@ -8,7 +8,7 @@ from livekit.agents.voice import Agent
 
 
 def test_original_voice_hooks_are_not_overridden():
-    from agent import VoiceAgent
+    from praxima.entrypoints.voice_worker import VoiceAgent
 
     assert VoiceAgent.tts_node is Agent.tts_node
     assert VoiceAgent.on_user_turn_completed is Agent.on_user_turn_completed
@@ -16,7 +16,7 @@ def test_original_voice_hooks_are_not_overridden():
 
 
 def test_only_unified_rag_tool_is_attached(monkeypatch):
-    import agent
+    from praxima.entrypoints import voice_worker as agent
 
     captured = {}
     monkeypatch.setattr(agent.Agent, "__init__", lambda self, **kw: captured.update(kw))
@@ -32,6 +32,13 @@ def test_only_unified_rag_tool_is_attached(monkeypatch):
 
 
 def test_no_clinic_orchestration_or_custom_speech_imported_by_agent():
-    tree = ast.parse((Path(__file__).resolve().parents[1] / "src/agent.py").read_text())
+    worker = Path(__file__).resolve().parents[1] / "src/praxima/entrypoints/voice_worker.py"
+    tree = ast.parse(worker.read_text())
     modules = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
-    assert not modules.intersection({"clinic.dev_voice", "clinic.sessions", "clinic.usage"})
+    assert not modules.intersection(
+        {
+            "praxima.dev.dev_voice",
+            "praxima.modules.engagement.application.sessions",
+            "praxima.runtime.usage",
+        }
+    )

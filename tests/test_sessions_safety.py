@@ -6,9 +6,9 @@ from uuid import uuid4
 import pytest
 from cryptography.exceptions import InvalidTag
 
-from clinic.privacy import PiiCipher
-from clinic.requests import ConfirmationState, RequestDetails
-from clinic.safety import classify, output_allowed, response
+from praxima.modules.engagement.domain.requests import ConfirmationState, RequestDetails
+from praxima.runtime.policy.safety import classify, output_allowed, response
+from praxima.shared.security.privacy import PiiCipher
 
 
 @pytest.mark.parametrize(
@@ -101,7 +101,7 @@ def test_request_validation_rejects_extra_scope_or_confirmation():
 
 
 def test_watchdog_and_close_are_bounded_and_idempotent():
-    from clinic.sessions import CallContext, CallOrchestrator
+    from praxima.modules.engagement.application.sessions import CallContext, CallOrchestrator
 
     class Service:
         def __init__(self):

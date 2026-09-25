@@ -8,10 +8,10 @@ import pytest
 from livekit.agents.llm import find_function_tools
 from pydantic import ValidationError
 
-from clinic.knowledge import Query, StructuredKnowledge
-from clinic.resolver import ClinicScope
-from clinic.snapshot import Snapshot, normalize
-from clinic.tools import ClinicTools
+from praxima.modules.agents.application.resolver import ClinicScope
+from praxima.modules.catalog.domain.knowledge import Query, StructuredKnowledge
+from praxima.modules.releases.domain.snapshot import Snapshot, normalize
+from praxima.runtime.tools.tools import ClinicTools
 
 
 def uid(number):

@@ -11,8 +11,8 @@ import aiohttp
 from dotenv import dotenv_values
 from livekit.plugins import sarvam
 
-from clinic.activation import development_settings, load_development
-from clinic.fallback_audio import FALLBACK, load_audio
+from praxima.dev.activation import development_settings, load_development
+from praxima.dev.fallback_audio import FALLBACK, load_audio
 
 ROOT = Path(__file__).resolve().parents[1]
 

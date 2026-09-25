@@ -6,7 +6,7 @@ from livekit.agents.stt import STTError
 from livekit.agents.tts import TTSError
 from livekit.agents.voice.events import ErrorEvent
 
-from clinic.voice_errors import recoverable, report
+from praxima.runtime.voice_errors import recoverable, report
 
 
 @pytest.mark.parametrize("event_type", [STTError, TTSError])

@@ -11,12 +11,12 @@ import psycopg
 import pytest
 from psycopg.rows import dict_row
 
-from clinic.development import fixture_id
-from clinic.publication import ClinicConfigurationService
-from clinic.resolver import ClinicScope, ConfigurationRepository
-from clinic.snapshot import Snapshot
-from clinic.staff import Forbidden
-from clinic.tools import ClinicTools
+from praxima.dev.development import fixture_id
+from praxima.modules.agents.application.resolver import ClinicScope, ConfigurationRepository
+from praxima.modules.iam.infrastructure.staff import Forbidden
+from praxima.modules.releases.application.publication import ClinicConfigurationService
+from praxima.modules.releases.domain.snapshot import Snapshot
+from praxima.runtime.tools.tools import ClinicTools
 
 pytestmark = pytest.mark.integration
 A, B = fixture_id("A"), fixture_id("B")

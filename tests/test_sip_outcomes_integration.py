@@ -5,7 +5,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from clinic.development import fixture_id
+from praxima.dev.development import fixture_id
 
 pytestmark = pytest.mark.integration
 

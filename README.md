@@ -154,8 +154,8 @@ secret management, never the migration URL.
 ## Verification
 
 ```sh
-uv run ruff format --check src/clinic scripts tests
-uv run ruff check src/clinic scripts tests
+uv run ruff format --check src/praxima scripts tests
+uv run ruff check src/praxima scripts tests
 uv run mypy
 uv run pytest -q
 uv run pytest -q --development-project=<development-project-ref>

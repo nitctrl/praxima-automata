@@ -9,14 +9,14 @@ import httpx
 import psycopg
 from dotenv import dotenv_values
 
-from clinic.activation import (
+from praxima.dev.activation import (
     bootstrap_owner,
     development_settings,
     provision_keys,
     publish_fictional,
     verify_history,
 )
-from clinic.settings import ConfigurationError
+from praxima.shared.db.settings import ConfigurationError
 
 ROOT = Path(__file__).resolve().parents[1]
 

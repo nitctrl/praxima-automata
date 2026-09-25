@@ -4,7 +4,7 @@ import psycopg
 import pytest
 from dotenv import dotenv_values
 
-from clinic.settings import ConfigurationError, DatabaseSettings
+from praxima.shared.db.settings import ConfigurationError, DatabaseSettings
 
 ROOT = Path(__file__).resolve().parents[1]
 

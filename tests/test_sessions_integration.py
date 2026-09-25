@@ -7,8 +7,8 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from clinic.development import fixture_id
-from clinic.privacy import PiiCipher
+from praxima.dev.development import fixture_id
+from praxima.shared.security.privacy import PiiCipher
 
 pytestmark = pytest.mark.integration
 A, B = fixture_id("A"), fixture_id("B")

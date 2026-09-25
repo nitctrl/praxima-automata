@@ -99,12 +99,12 @@ Nothing can be answered until a manager has published a version. See section 7.
 ### Step 1. The worker is already running
 
 `uv run src/agent.py start` (phone) or `console` (local mic) starts a LiveKit worker named
-`inbound-agent` (`src/agent.py:205-214`). At startup it **prewarms** the Silero VAD model once
-per process (`src/agent.py:114-118`).
+`inbound-agent` (`src/praxima/entrypoints/voice_worker.py:205-214`). At startup it **prewarms** the Silero VAD model once
+per process (`src/praxima/entrypoints/voice_worker.py:114-118`).
 
 ### Step 2. A call arrives and the worker joins the room
 
-`entrypoint()` (`src/agent.py:121`) runs for each call:
+`entrypoint()` (`src/praxima/entrypoints/voice_worker.py:121`) runs for each call:
 
 1. `ctx.connect()` joins the LiveKit room.
 2. `ctx.wait_for_participant()` waits for the caller, so the greeting is not clipped.
@@ -113,10 +113,10 @@ per process (`src/agent.py:114-118`).
 
 ### Step 3. Authorization gate: who may see clinic data?
 
-`src/agent.py:160-173`:
+`src/praxima/entrypoints/voice_worker.py:160-173`:
 
 - **Console / mic session:** authorized automatically.
-- **Phone call:** authorized only if `clinic_ingress()` (`src/clinic/sip_test.py:73`) accepts it.
+- **Phone call:** authorized only if `clinic_ingress()` (`src/praxima/dev/sip_test.py:73`) accepts it.
   It requires a native SIP participant whose `sip.trunkPhoneNumber`, `sip.trunkID` and
   `sip.ruleID` **exactly match three constants hard-coded in `sip_test.py`**, and a safe
   `sip.callID`. Anything else is rejected and the call gets **no clinic knowledge**.
@@ -125,13 +125,13 @@ The caller ID is never used for authorization. Only LiveKit's own trusted attrib
 
 ### Step 4. Load the knowledge from the database (the only DB read)
 
-`load_agent_knowledge()` (`src/clinic/agent_knowledge.py:63-96`):
+`load_agent_knowledge()` (`src/praxima/runtime/tools/agent_knowledge.py:63-96`):
 
 1. Read `SUPABASE_PROJECT_REF` from `.env` and `DATABASE_URL` from **`.env.runtime`**.
-2. `DatabaseSettings.validate()` (`src/clinic/settings.py`) rejects anything that is not this
+2. `DatabaseSettings.validate()` (`src/praxima/shared/db/settings.py`) rejects anything that is not this
    project's direct/session-pooler URI on port 5432 with `sslmode=require`.
 3. Open a small pool (max 4 connections) as the restricted role **`clinic_runtime`**
-   (`src/clinic/db.py:15-63`). Every connection re-checks it is that role and not a
+   (`src/praxima/shared/db/pool.py:15-63`). Every connection re-checks it is that role and not a
    superuser/`BYPASSRLS`.
 4. Set the tenant scope for the transaction: `set_config('app.clinic_id', <Clinic A>, true)`.
 5. `SET TRANSACTION READ ONLY`, then run exactly one query:
@@ -141,7 +141,7 @@ The caller ID is never used for authorization. Only LiveKit's own trusted attrib
    WHERE clinic_id = %s AND status = 'published';
    ```
 6. Require **exactly one** row, validate it with the pydantic `Snapshot` model
-   (`src/clinic/snapshot.py:173`), and keep it in memory. Close the database connection.
+   (`src/praxima/modules/releases/domain/snapshot.py:173`), and keep it in memory. Close the database connection.
 7. Overall timeout is 20 seconds. **Any failure** returns an empty `AgentKnowledge(None)`.
 
 If that fails, the call still connects. The agent's instructions become: *"Clinic knowledge is
@@ -149,7 +149,7 @@ unavailable. Do not invent clinic facts."* It never falls back to made-up or dem
 
 ### Step 5. Build the agent and start the session
 
-`VoiceAgent` (`src/agent.py:48-97`) is configured with:
+`VoiceAgent` (`src/praxima/entrypoints/voice_worker.py:48-97`) is configured with:
 
 | Slot | Value |
 | --- | --- |
@@ -162,7 +162,7 @@ unavailable. Do not invent clinic facts."* It never falls back to made-up or dem
 | Endpointing | Phone 0.45-1.2 s; mic 0.21-0.75 s (phone is more patient) |
 
 Then `on_enter()` makes the agent **speak first**: a one-sentence warm greeting in Hindi
-unless the caller speaks English (`src/agent.py:99-107`).
+unless the caller speaks English (`src/praxima/entrypoints/voice_worker.py:99-107`).
 
 ### Step 6. Each turn of conversation
 
@@ -196,8 +196,8 @@ No database query happens in this loop. Retrieval runs against the snapshot alre
 
 ### 5.1 The system prompt
 
-Rendered from `src/clinic/templates/agent_system_prompt.j2` by `render_prompt()`
-(`src/clinic/prompt.py`). It injects the clinic name, timezone, supported languages, the
+Rendered from `src/praxima/packs/clinic/prompts/agent_system_prompt.j2` by `render_prompt()`
+(`src/praxima/runtime/prompting.py`). It injects the clinic name, timezone, supported languages, the
 **current clinic-local time**, the published **emergency message**, and a list of current and
 scheduled **live updates**.
 
@@ -218,8 +218,8 @@ Its main rules for the model:
 
 ### 5.2 The one tool: `search_clinic_knowledge`
 
-Defined in `src/clinic/agent_knowledge.py:51-60`. It takes the question and calls
-`HybridRetriever.result()` (`src/clinic/rag.py:75`), which:
+Defined in `src/praxima/runtime/tools/agent_knowledge.py:51-60`. It takes the question and calls
+`HybridRetriever.result()` (`src/praxima/modules/knowledge/application/retrieval.py:75`), which:
 
 1. Rejects empty questions or ones over 500 characters.
 2. Runs a hybrid search (5.3).
@@ -230,7 +230,7 @@ Defined in `src/clinic/agent_knowledge.py:51-60`. It takes the question and call
 
 ### 5.3 What is searchable: the retrieval corpus
 
-Built by `snapshot_sections()` (`src/clinic/rag.py:25-44`). It contains exactly two things:
+Built by `snapshot_sections()` (`src/praxima/modules/knowledge/application/retrieval.py:25-44`). It contains exactly two things:
 
 1. **Reviewed document sections**: paragraphs from `.docx` / `.md` files staff uploaded, edited
    and approved (about, vision, doctor bios, policies, and so on).
@@ -239,7 +239,7 @@ Built by `snapshot_sections()` (`src/clinic/rag.py:25-44`). It contains exactly 
 
 ### 5.4 Hybrid search with Reciprocal Rank Fusion (RRF)
 
-`DocumentIndex.search()` (`src/clinic/documents.py:323-371`) fuses two rankings:
+`DocumentIndex.search()` (`src/praxima/modules/knowledge/domain/documents.py:323-371`) fuses two rankings:
 
 | Ranker | How it works |
 | --- | --- |
@@ -325,7 +325,7 @@ Guarantees enforced in SQL:
 ## 7. The authoring side: how knowledge gets published
 
 `uv run python scripts/dashboard.py` starts a FastAPI app on `http://127.0.0.1:8080`
-(`src/clinic/dashboard.py`).
+(`src/praxima/entrypoints/api.py`).
 
 ```mermaid
 flowchart TD
@@ -345,11 +345,11 @@ Details worth knowing:
 
 - **Preview then publish is enforced.** Publishing needs a saved preview; the digest and the
   active-version pointer are re-checked, so a concurrent change makes publish fail safely
-  (`dashboard.py:459-504`, `src/clinic/publication.py`).
+  (`dashboard.py:459-504`, `src/praxima/modules/releases/application/publication.py`).
 - **`build_snapshot()`** (migration 009) copies only allow-listed columns of active/published
   rows, plus reviewed sections of published, effective documents. Internal notes never enter a
   snapshot "by construction", not by prompt instruction.
-- **Document upload limits** (`src/clinic/documents.py`): 5 MiB, 200 sections, 100,000
+- **Document upload limits** (`src/praxima/modules/knowledge/domain/documents.py`): 5 MiB, 200 sections, 100,000
   characters, no macros or embedded objects, no external XML entities, archive-bomb checks. An
   upload never reaches a caller until it is reviewed, approved and a new version is published.
 - **Rollback** republishes an earlier version's content as a new version.
@@ -376,7 +376,7 @@ Details worth knowing:
 
 ## 9. Built but NOT attached to the live voice agent
 
-A large part of `src/clinic/` implements the fuller product design and is **not** used by
+A large part of `src/praxima/` implements the fuller product design and is **not** used by
 `agent.py` today. The README is explicit that no custom turn handler, session orchestration,
 usage writes, request collection or transfer is attached to the live path.
 
@@ -449,17 +449,17 @@ document -> preview -> publish -> then call.**
 | Path | Role |
 | --- | --- |
 | `src/agent.py` | Worker entrypoint, `VoiceAgent`, providers, lifecycle |
-| `src/clinic/agent_knowledge.py` | Loads the published snapshot; defines the search tool |
-| `src/clinic/rag.py` | `HybridRetriever`, corpus construction, live-update helpers |
-| `src/clinic/documents.py` | Upload extraction, tokenizer, lexical index, RRF |
-| `src/clinic/vectors.py` | Optional Qdrant + fastembed adapter |
-| `src/clinic/prompt.py` + `templates/agent_system_prompt.j2` | System prompt |
-| `src/clinic/snapshot.py` | Typed, validated, immutable snapshot model |
-| `src/clinic/db.py`, `settings.py` | Restricted runtime DB pool and DSN validation |
-| `src/clinic/publication.py` | Preview / publish / rollback service |
-| `src/clinic/dashboard.py` | Staff dashboard JSON API (UI lives in `../frontend`) |
-| `src/clinic/answers.py` | Gemini grounded answerer for dashboard Agent test |
-| `src/clinic/sip_test.py`, `resolver.py` | SIP ingress check, called-number resolution |
+| `src/praxima/runtime/tools/agent_knowledge.py` | Loads the published snapshot; defines the search tool |
+| `src/praxima/modules/knowledge/application/retrieval.py` | `HybridRetriever`, corpus construction, live-update helpers |
+| `src/praxima/modules/knowledge/domain/documents.py` | Upload extraction, tokenizer, lexical index, RRF |
+| `src/praxima/integrations/vectors/qdrant.py` | Optional Qdrant + fastembed adapter |
+| `src/praxima/runtime/prompting.py` + `templates/agent_system_prompt.j2` | System prompt |
+| `src/praxima/modules/releases/domain/snapshot.py` | Typed, validated, immutable snapshot model |
+| `src/praxima/shared/db/pool.py`, `settings.py` | Restricted runtime DB pool and DSN validation |
+| `src/praxima/modules/releases/application/publication.py` | Preview / publish / rollback service |
+| `src/praxima/entrypoints/api.py` | Staff dashboard JSON API (UI lives in `../frontend`) |
+| `src/praxima/integrations/llm/gemini.py` | Gemini grounded answerer for dashboard Agent test |
+| `src/praxima/dev/sip_test.py`, `resolver.py` | SIP ingress check, called-number resolution |
 | `scripts/database.py` | Migrate / seed / provision-runtime / status |
 | `scripts/dashboard.py` | Starts the dashboard |
 | `supabase/migrations/` | Schema, RLS, publication functions |

@@ -5,13 +5,13 @@ from uuid import uuid4
 
 import pytest
 
-from clinic.resolver import (
+from praxima.modules.agents.application.resolver import (
     ClinicResolver,
     ClinicUnavailable,
     ConfigurationRepository,
     InboundDestination,
 )
-from clinic.settings import ConfigurationError, DatabaseSettings
+from praxima.shared.db.settings import ConfigurationError, DatabaseSettings
 
 REF = "a" * 20
 VALID = f"postgresql://postgres.{REF}:example@aws-0-example.pooler.supabase.com:5432/postgres?sslmode=require"

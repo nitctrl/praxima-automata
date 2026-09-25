@@ -13,15 +13,19 @@ from livekit.agents import AgentSession, JobContext, JobProcess, WorkerOptions, 
 from livekit.agents.voice.events import MetricsCollectedEvent
 from livekit.plugins import sarvam, silero
 
-from clinic.activation import load_development
-from clinic.db import RuntimeDatabase
-from clinic.dev_conversation import DevelopmentConversation
-from clinic.dev_voice import DevelopmentVoiceAgent
-from clinic.fallback_audio import FALLBACK, load_audio
-from clinic.resolver import ClinicResolver, InboundDestination, PostgresResolutionRepository
-from clinic.sessions import CallOrchestrator, CallSessionService
-from clinic.settings import DatabaseSettings
-from clinic.usage import UsageCollector
+from praxima.dev.activation import load_development
+from praxima.dev.dev_conversation import DevelopmentConversation
+from praxima.dev.dev_voice import DevelopmentVoiceAgent
+from praxima.dev.fallback_audio import FALLBACK, load_audio
+from praxima.modules.agents.application.resolver import (
+    ClinicResolver,
+    InboundDestination,
+    PostgresResolutionRepository,
+)
+from praxima.modules.engagement.application.sessions import CallOrchestrator, CallSessionService
+from praxima.runtime.usage import UsageCollector
+from praxima.shared.db.pool import RuntimeDatabase
+from praxima.shared.db.settings import DatabaseSettings
 
 ROOT = Path(__file__).resolve().parents[1]
 

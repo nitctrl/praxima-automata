@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from test_structured_knowledge import content  # noqa: F401
 
-from clinic.dashboard import SupabaseGateway, WebSettings, create_app
+from praxima.entrypoints.api import SupabaseGateway, WebSettings, create_app
 
 CLINIC, OTHER, USER, VERSION = uuid4(), uuid4(), uuid4(), uuid4()
 DOCTOR, DOCUMENT = uuid4(), uuid4()

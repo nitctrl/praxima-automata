@@ -6,9 +6,9 @@ from pathlib import Path
 import uvicorn
 from dotenv import dotenv_values
 
-from clinic.activation import DEV_FILE, load_development
-from clinic.answers import gemini_answerer
-from clinic.dashboard import WebSettings, create_app
+from praxima.dev.activation import DEV_FILE, load_development
+from praxima.entrypoints.api import WebSettings, create_app
+from praxima.integrations.llm.gemini import gemini_answerer
 
 
 def main() -> None:

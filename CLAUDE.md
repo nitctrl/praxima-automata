@@ -106,8 +106,9 @@ Breaking any of these is a bug, even if the tests pass.
   size limits, trusted hosts, `Cache-Control: no-store`, and CSP `default-src 'none'`.
 
 **Dev vs production**
-- Fictional development code (`development.py`, `dev_*.py`, `activation.py`, `sip_test.py`,
-  `fallback_audio.py`; target `dev/`) is never imported by production entrypoints.
+- Fictional development code (`src/praxima/dev/`) is never imported by production code.
+  The only exceptions are the two existing activation guards listed in
+  `tests/test_architecture.py`.
 - Never assign, dispatch or reconfigure a real phone number from code.
 
 ---
@@ -258,11 +259,30 @@ packs/<pack_id>/
 
 ## 5. Folder structure
 
-### 5.1 Today
+### 5.1 Today (after step 1)
 
-A flat, clinic-specific package `src/clinic/*.py` (~30 modules) plus `src/agent.py`. The
-HTTP API is a single ~800-line `create_app()` closure in `src/clinic/dashboard.py`.
-Migrations are in `supabase/migrations/` (Supabase-bound). Tests are flat in `tests/`.
+The code lives in `src/praxima/` in the target layout. **Step 1 moved whole files with no
+behaviour change**, so the content is still clinic-specific:
+- `entrypoints/api.py` is still the single ~800-line `create_app()` (the old `dashboard.py`).
+- `entrypoints/voice_worker.py` is the old `src/agent.py`. It is excluded from ruff and mypy,
+  as before. `src/agent.py` is now a thin wrapper that calls its `main()`, and stays as the
+  LiveKit deploy path.
+- The clinic prompt template is in `packs/clinic/prompts/`.
+- File placement deviates slightly from §5.3 where no split has happened yet:
+  - `settings.py` → `shared/db/settings.py`, `db.py` → `shared/db/pool.py`
+  - `speech.py` → `runtime/speech/normalize.py`, `rag.py` →
+    `modules/knowledge/application/retrieval.py`
+  - `voice_errors.py` and `usage.py` → `runtime/`
+  - `answers.py` → `integrations/llm/gemini.py`
+  - dev files keep their names under `dev/`
+
+Migrations are still in `supabase/migrations/`, and tests are still flat in `tests/`.
+
+`tests/test_architecture.py` enforces the dependency rules. It lists today's four known
+violations **exactly**, fails on any new one, and fails if a listed one is fixed but not
+removed. Rule 4 (modules use only each other's public interface) is **not enforced yet**:
+most code still imports `modules.releases.domain.snapshot` and other internals directly.
+Step 3 fixes this.
 
 ### 5.2 Target
 
@@ -332,7 +352,7 @@ praxima-automata/
     └── architecture/              # import rules (import-linter / pytest)
 ```
 
-### 5.3 Migration map (current → target)
+### 5.3 Migration map (original `src/clinic` → target)
 
 | Current (`src/clinic/…`) | Target (`src/praxima/…`) |
 | --- | --- |
@@ -361,9 +381,8 @@ praxima-automata/
 
 ### 5.4 How to migrate (incremental, never big-bang)
 
-1. **Skeleton first:** create `praxima/shared`, `entrypoints` and empty modules. Move code
-   with no behaviour change, one module per PR, with the full check suite green each time.
-   Keep re-export shims at old import paths only while something still imports them.
+1. ✅ **Skeleton first (done):** `src/praxima/` skeleton; every file moved with no
+   behaviour change, and all imports updated (no `clinic` package or shims left).
 2. **API next:** split `dashboard.py` into `entrypoints/api.py` + `http/` + module routers
    (best test coverage). Then move to the REST `/api/v1` contract (§6) together with
    `../frontend`.

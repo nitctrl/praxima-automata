@@ -10,8 +10,8 @@ from livekit import rtc
 from test_dev_voice import harness  # noqa: F401
 from test_structured_knowledge import content as knowledge_content  # noqa: F401
 
-from clinic.resolver import ClinicUnavailable
-from clinic.sip_test import CLINIC, NUMBER, RULE, TRUNK, SipTestConversation, ingress
+from praxima.dev.sip_test import CLINIC, NUMBER, RULE, TRUNK, SipTestConversation, ingress
+from praxima.modules.agents.application.resolver import ClinicUnavailable
 
 
 def attributes():
