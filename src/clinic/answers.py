@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
-from anthropic import AsyncAnthropic
+from google import genai
+from google.genai import types
 
 from clinic.prompt import render_prompt
 from clinic.snapshot import Snapshot
@@ -13,7 +14,7 @@ from clinic.snapshot import Snapshot
 GroundedAnswerer = Callable[[str, Snapshot, Sequence[dict[str, Any]]], Awaitable[str]]
 
 
-def anthropic_answerer(api_key: str, model: str) -> GroundedAnswerer:
+def gemini_answerer(api_key: str, model: str) -> GroundedAnswerer:
     """Create a short-answer generator that can only use retrieved passages."""
 
     async def answer(
@@ -28,22 +29,24 @@ def anthropic_answerer(api_key: str, model: str) -> GroundedAnswerer:
             "\n\nThis is a dashboard test, so the relevant passages are already supplied. "
             "Do not call a tool; answer from those supplied passages."
         )
-        async with AsyncAnthropic(api_key=api_key, timeout=20, max_retries=1) as client:
-            response = await client.messages.create(
+        client = genai.Client(
+            api_key=api_key,
+            http_options=types.HttpOptions(
+                timeout=20_000, retry_options=types.HttpRetryOptions(attempts=2)
+            ),
+        )
+        async with client.aio as aclient:
+            response = await aclient.models.generate_content(
                 model=model,
-                max_tokens=220,
-                temperature=0,
-                system=system,
-                messages=[{
-                    "role": "user",
-                    "content": (
-                        f"Question: {question}\n\nRetrieved passages:\n{context}"
-                    ),
-                }],
+                contents=f"Question: {question}\n\nRetrieved passages:\n{context}",
+                config=types.GenerateContentConfig(
+                    system_instruction=system,
+                    temperature=0,
+                    max_output_tokens=220,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                ),
             )
-        generated = "".join(
-            block.text for block in response.content if block.type == "text"
-        ).strip()
+        generated = (response.text or "").strip()
         if not generated:
             raise RuntimeError("Answer provider returned no text")
         return generated

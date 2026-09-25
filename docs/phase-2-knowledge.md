@@ -3,7 +3,7 @@
 ## Scope and deployment state
 
 Phase 2 adds **offline/backend functionality**, not a deployed clinic voice agent.
-The LiveKit/Sarvam/Anthropic pipeline, worker name, phone assignments and SIP
+The LiveKit/Sarvam/Gemini pipeline, worker name, phone assignments and SIP
 configuration remain unchanged. No database functions are attached to live calls.
 Requests, transfers, clinical-safety routing, prompts and lifecycle integration
 remain Phase 3; verified browser Auth and the dashboard remain Phase 4.

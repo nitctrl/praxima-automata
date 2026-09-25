@@ -7,7 +7,7 @@ import uvicorn
 from dotenv import dotenv_values
 
 from clinic.activation import DEV_FILE, load_development
-from clinic.answers import anthropic_answerer
+from clinic.answers import gemini_answerer
 from clinic.dashboard import WebSettings, create_app
 
 
@@ -23,8 +23,8 @@ def main() -> None:
         "QDRANT_COLLECTION",
         "QDRANT_EMBEDDING_MODEL",
         "QDRANT_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_MODEL",
+        "GOOGLE_API_KEY",
+        "GEMINI_MODEL",
     ):
         if values.get(name):
             os.environ.setdefault(name, values[name] or "")
@@ -43,10 +43,10 @@ def main() -> None:
                 "Invalid private development settings; dashboard startup refused."
             ) from None
     answerer = None
-    if values.get("ANTHROPIC_API_KEY"):
-        answerer = anthropic_answerer(
-            values["ANTHROPIC_API_KEY"] or "",
-            values.get("ANTHROPIC_MODEL") or "claude-sonnet-4-20250514",
+    if values.get("GOOGLE_API_KEY"):
+        answerer = gemini_answerer(
+            values["GOOGLE_API_KEY"] or "",
+            values.get("GEMINI_MODEL") or "gemini-2.5-flash",
         )
     uvicorn.run(
         create_app(settings, cipher=cipher, answerer=answerer),

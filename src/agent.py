@@ -1,7 +1,7 @@
 """
 Voice AI Agent — Final Working Version
 =======================================
-Stack: LiveKit Agents + Sarvam STT/TTS + Anthropic Haiku
+Stack: LiveKit Agents + Sarvam STT/TTS + Google Gemini
 
 Architecture (confirmed from introspection):
   Agent      → ALL config: instructions, stt, llm, tts, vad, tools,
@@ -23,7 +23,7 @@ from livekit.agents import (
     cli,
 )
 from livekit.agents.voice import Agent, AgentSession
-from livekit.plugins import anthropic, noise_cancellation, sarvam, silero
+from livekit.plugins import google, noise_cancellation, sarvam, silero
 
 from clinic.agent_knowledge import AgentKnowledge, load_agent_knowledge
 from clinic.sip_test import ingress as clinic_ingress
@@ -68,10 +68,10 @@ class VoiceAgent(Agent):
                 api_key=os.environ.get("SARVAM_API_KEY"),
             ),
 
-            # ── LLM: Anthropic Sonnet ─────────────────────────────
-            llm=anthropic.LLM(
-                model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
-                api_key=os.environ.get("ANTHROPIC_API_KEY"),
+            # ── LLM: Google Gemini ────────────────────────────────
+            llm=google.LLM(
+                model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+                api_key=os.environ.get("GOOGLE_API_KEY"),
                 temperature=0,
             ),
 

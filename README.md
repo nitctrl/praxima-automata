@@ -1,6 +1,6 @@
 # AI Clinic Receptionist — development foundation
 
-The original LiveKit/Sarvam/Anthropic voice pipeline is preserved. The current step
+The original LiveKit/Sarvam/Gemini voice pipeline is preserved. The current step
 adds **read-only published knowledge for fictional Clinic A** to the original LLM
 agent. No custom turn handler, custom TTS, call-session orchestration, usage writes,
 request collection or transfer is attached to this path.

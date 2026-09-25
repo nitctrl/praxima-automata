@@ -20,7 +20,7 @@ def test_only_unified_rag_tool_is_attached(monkeypatch):
 
     captured = {}
     monkeypatch.setattr(agent.Agent, "__init__", lambda self, **kw: captured.update(kw))
-    for provider, name in [(agent.sarvam, "STT"), (agent.sarvam, "TTS"), (agent.anthropic, "LLM")]:
+    for provider, name in [(agent.sarvam, "STT"), (agent.sarvam, "TTS"), (agent.google, "LLM")]:
         monkeypatch.setattr(provider, name, Mock())
     agent.VoiceAgent(telephony=True)
     assert len(captured["tools"]) == 1
@@ -28,7 +28,7 @@ def test_only_unified_rag_tool_is_attached(monkeypatch):
     assert "Clinic knowledge is unavailable" in captured["instructions"]
     assert captured["min_endpointing_delay"] == 0.45
     assert captured["max_endpointing_delay"] == 1.2
-    assert agent.anthropic.LLM.call_args.kwargs["temperature"] == 0
+    assert agent.google.LLM.call_args.kwargs["temperature"] == 0
 
 
 def test_no_clinic_orchestration_or_custom_speech_imported_by_agent():

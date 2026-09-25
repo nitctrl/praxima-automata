@@ -29,11 +29,11 @@ There is no first-party database, frontend, API server, migration, automated tes
 | Package manager | uv with project-local virtual environment and lockfile |
 | LiveKit RTC | Installed 1.1.13 |
 | LiveKit Agents | Installed 1.3.11 |
-| Anthropic, Sarvam, Silero, turn-detector plugins | Installed 1.3.11 |
+| Google, Sarvam, Silero, turn-detector plugins | Installed 1.3.11 |
 | Noise cancellation plugin | Installed 0.2.6 |
 | python-dotenv | Installed 1.2.2 |
 | STT | Sarvam `saaras:v3`; `SARVAM_STT_LANGUAGE`, default `hi-IN` |
-| LLM | Anthropic; `ANTHROPIC_MODEL`, source default `claude-sonnet-4-20250514`; temperature 0.7 |
+| LLM | Google Gemini; `GEMINI_MODEL`, source default `gemini-2.5-flash`; temperature 0 |
 | TTS | Sarvam `bulbul:v3`; language/speaker environment settings, defaults `hi-IN`/`shubh` |
 | VAD | Silero, prewarmed per worker process |
 | Turn detector | Optional multilingual model; source falls back to VAD-only |
@@ -50,14 +50,14 @@ flowchart LR
     D --> R[New call- room]
     R --> W[inbound-agent worker]
     W --> S[Sarvam STT]
-    S --> A[Anthropic and lookup_info]
+    S --> A[Gemini and lookup_info]
     A --> T[Sarvam TTS]
     T --> R
 ```
 
 The source connects to the room, waits for a participant, then creates an `AgentSession` and `VoiceAgent`. Native SIP detection uses `PARTICIPANT_KIND_SIP`. A legacy `telephony=true` attribute also affects audio tuning; it must **not** become an authorization signal for clinic access. The current tool is a process-global keyword lookup over four demo business topics, not vector retrieval and not clinic-approved knowledge.
 
-Preserve worker name `inbound-agent`, explicit dispatch, greeting-after-participant ordering, Sarvam/Anthropic integrations, prewarmed VAD, and telephony noise cancellation. Current telephone endpointing is 0.45–1.2 seconds; microphone endpointing is 0.21–0.75 seconds. No carrier WebSocket bridge is needed.
+Preserve worker name `inbound-agent`, explicit dispatch, greeting-after-participant ordering, Sarvam/Gemini integrations, prewarmed VAD, and telephony noise cancellation. Current telephone endpointing is 0.45–1.2 seconds; microphone endpointing is 0.21–0.75 seconds. No carrier WebSocket bridge is needed.
 
 Deployment evidence is a local `uv run src/agent.py dev` worker connecting to LiveKit Cloud, not a reproducible always-on hosted worker deployment. Two worker parent processes were present at audit; neither was stopped. Multiple workers are supported but can make local log diagnosis confusing. Process presence does not prove registration or readiness.
 
