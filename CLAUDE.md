@@ -213,6 +213,12 @@ Request flow: `router → service (write) | selector (read) → models → Postg
 - Services and selectors use the request's `AsyncSession` (already tenant-scoped) and this
   module's ORM models directly. There is no repository or port layer for plain CRUD.
 
+**Module interfaces are lazy** (`praxima.shared.lazy.lazy_exports`, with real imports under
+`TYPE_CHECKING` for mypy). The voice worker imports a few legacy files that sit inside module
+packages. A lazy `__init__.py` means it never loads the platform code those packages also
+expose. `test_voice_worker_loads_no_platform_code` fails if platform code or SQLAlchemy
+leaks into the voice worker's imports.
+
 Dependency rules (`tests/test_architecture.py` enforces them):
 1. `domain/` imports only `shared.kernel`, `shared.errors` and the stdlib/pydantic. No I/O,
    env or clock reads (inject time).

@@ -88,3 +88,57 @@ def test_known_exceptions_are_not_stale():
 def test_no_legacy_clinic_package():
     assert not (SRC / "clinic").exists()
     assert "clinic" not in {m.split(".")[0] for targets in _imports().values() for m in targets}
+
+
+PLATFORM_CODE = (
+    ".infrastructure.models",
+    ".application.services",
+    ".application.selectors",
+    ".api.",
+    "praxima.packs",
+    "praxima.shared.db.base",
+    "praxima.shared.db.engine",
+    "praxima.entrypoints.http",
+)
+
+
+def test_voice_worker_loads_no_platform_code():
+    """The voice agent must not depend on the new platform code (it can't break it)."""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    probe = (
+        "import json, sys; import praxima.entrypoints.voice_worker; "
+        "prefixes = ('praxima', 'sqlalchemy'); "
+        "print(json.dumps(sorted(m for m in sys.modules if m.startswith(prefixes))))"
+    )
+    env = {**os.environ, "PYTHONPATH": str(SRC)}
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, env=env, timeout=120
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    loaded = json.loads(result.stdout.strip().splitlines()[-1])
+    leaked = [m for m in loaded if m.startswith("sqlalchemy") or any(p in m for p in PLATFORM_CODE)]
+    assert leaked == []
+
+
+def test_module_interfaces_are_lazy_and_complete():
+    import importlib
+
+    for path in sorted((SRC / "praxima" / "modules").glob("*/__init__.py")):
+        package = importlib.import_module(f"praxima.modules.{path.parent.name}")
+        exports = getattr(package, "_EXPORTS", None)
+        if exports is None:
+            continue
+        assert package.__all__ == sorted(exports)
+        typed = {}
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.If) and getattr(node.test, "id", "") == "TYPE_CHECKING":
+                for imp in node.body:
+                    assert isinstance(imp, ast.ImportFrom)
+                    typed.update({alias.name: imp.module for alias in imp.names})
+        assert typed == exports, path  # type-checker imports match the lazy map
+        for name in exports:
+            assert getattr(package, name) is not None
