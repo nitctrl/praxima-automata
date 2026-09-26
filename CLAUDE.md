@@ -183,24 +183,44 @@ active announcements.
 
 ### 4.4 Layers inside every module
 
+Every module has the same shape:
+
 ```
- api/  (HTTP adapter: routers, request/response schemas)       ─┐
- runtime hooks (voice tools exposed by the module)              ├─► application/
-                                                                ─┘   use cases, ports (Protocols)
-                                                                            │
-                                                                        domain/
-                                                              pure models, rules, state machines
-                                                                            ▲
- infrastructure/  repositories and provider adapters implement the ports ───┘
+modules/<module>/
+├── __init__.py          # PUBLIC interface: the only names other modules may import
+├── api/
+│   ├── router.py        # endpoints only: validated input → service/selector → response
+│   └── schemas.py       # Pydantic request/response models (API validation + OpenAPI)
+├── application/
+│   ├── services.py      # WRITE: create/update/delete, business rules, one transaction
+│   └── selectors.py     # READ: optimized queries (eager loading, columns, keyset paging)
+├── domain/
+│   ├── rules.py         # pure business rules and state machines (only where needed)
+│   └── errors.py        # module errors, subclasses of shared.errors
+└── infrastructure/
+    ├── models.py        # SQLAlchemy tables of this module's schema
+    └── <adapter>.py     # external providers (identity, CRM, vectors ...)
 ```
 
-Dependency rules (enforce in review; add `import-linter` contracts when the move starts):
-1. `domain/` imports only `shared.kernel` and the stdlib/pydantic. No I/O, env or clock
-   reads (inject time).
-2. `application/` depends on `domain/` and **ports**, never on concrete clients.
-3. `infrastructure/` is the only layer that imports `psycopg`, `sqlalchemy`, `httpx`,
-   provider SDKs, `qdrant_client`, `google.genai`, `livekit` or `fastembed`. The exception
-   is `shared/db` for SQLAlchemy (`tests/test_architecture.py` enforces this).
+Request flow: `router → service (write) | selector (read) → models → Postgres`.
+
+- **Routers never touch the database.** They validate input (schemas), call exactly one
+  service or selector, and return a schema. No business logic.
+- **Services write, selectors read.** A selector never changes data. A service may call a
+  selector to reload what it wrote.
+- **Services and selectors raise errors; they never build HTTP responses.** The global
+  error handler maps errors to status codes (§6).
+- Services and selectors use the request's `AsyncSession` (already tenant-scoped) and this
+  module's ORM models directly. There is no repository or port layer for plain CRUD.
+
+Dependency rules (`tests/test_architecture.py` enforces them):
+1. `domain/` imports only `shared.kernel`, `shared.errors` and the stdlib/pydantic. No I/O,
+   env or clock reads (inject time).
+2. `application/` may use SQLAlchemy and its own module's `infrastructure/models.py`,
+   plus `domain/`. It never imports `fastapi` or another module's internals.
+3. SQLAlchemy is allowed only in `shared/db`, `application/` and `infrastructure/`.
+   Provider SDKs (`httpx` clients, `qdrant_client`, `google.genai`, `livekit`, `fastembed`)
+   live only in `infrastructure/` or `integrations/`.
 4. **Modules talk to each other only through their `application` public interface** (the
    names exported in `module/__init__.py`) or through domain events. Never import another
    module's `infrastructure/` or `domain/` internals, and never query another module's
@@ -321,14 +341,15 @@ praxima-automata/
 │       │   ├── security/          # PII envelope encryption, HMAC lookup, hashing
 │       │   ├── db/                # base.py (ORM base, mixins), engine.py (sessions,
 │       │   │                      # tenant_transaction), registry.py, pool.py (legacy), outbox
+│       │   ├── errors.py          # AppError family → mapped to HTTP by entrypoints/http
 │       │   └── events.py          # domain event base + in-process bus
 │       ├── modules/
-│       │   ├── iam/
+│       │   ├── iam/               # same shape for every module (§4.4)
 │       │   │   ├── __init__.py    # PUBLIC interface: the only thing other modules import
-│       │   │   ├── domain/        # models, rules (pure)
-│       │   │   ├── application/   # services/use cases, ports.py
-│       │   │   ├── infrastructure/# repositories (Postgres), identity-provider adapters
-│       │   │   └── api/           # router.py, schemas.py
+│       │   │   ├── api/           # router.py, schemas.py
+│       │   │   ├── application/   # services.py (write), selectors.py (read)
+│       │   │   ├── domain/        # rules.py, errors.py (pure)
+│       │   │   └── infrastructure/# models.py (SQLAlchemy), provider adapters
 │       │   ├── tenancy/  agents/  catalog/  knowledge/
 │       │   ├── releases/  engagement/  billing/  audit/
 │       ├── runtime/               # voice conversation runtime (domain-neutral)
@@ -346,7 +367,9 @@ praxima-automata/
 │       │   └── loader.py          # load and validate manifests and schemas, version registry
 │       ├── entrypoints/
 │       │   ├── api.py             # create_app(): middleware, /api/v1 module routers, lifespan
-│       │   ├── http/              # middleware (origin/CSRF/size/headers), deps (session, roles)
+│       │   ├── http/              # errors.py (global handlers), responses.py (Page, Problem),
+│       │   │                      # middleware.py (request id, origin/CSRF/size/headers),
+│       │   │                      # deps.py (session per request, principal, paging)
 │       │   ├── voice_worker.py    # LiveKit entrypoint/prewarm
 │       │   ├── jobs.py            # scheduled/background jobs
 │       │   └── cli.py             # migrate, seed <pack>, provision, status
@@ -458,14 +481,37 @@ Rules:
 - Auth and roles are FastAPI dependencies (`Depends(require_role(Role.MANAGER))`).
   Permissions are named actions (`entities:write`, `pii:reveal`), mapped to roles in one
   place.
-- Errors are always `{"detail": "<safe message>"}`. Status codes: 400 validation, 401
-  session, 403 role/origin/CSRF, 404 not in this workspace, 409 conflict/preview
-  required/stale digest, 413, 415, 422 schema-invalid attributes, 429, 503 upstream.
+- **Responses are consistent, not wrapped.**
+  - A single resource returns the object itself.
+  - A list returns `{"data": [...], "page": {"limit": 50, "next_cursor": "…" | null}}`
+    (`Page[T]`).
+  - `DELETE` returns 204. There is no `{"success": …}` envelope; the HTTP status says it.
+- **Errors are always RFC 9457 Problem Details** (`application/problem+json`), produced only
+  by the global handlers in `entrypoints/http/errors.py`:
+  `{"type", "title", "status", "detail", "request_id", "errors": [{"field", "message"}]}`.
+  - `detail` is always a safe, human message (the frontend reads it).
+  - `errors` lists field problems for 422, and never echoes submitted values (they may be
+    PII).
+  - Code raises `shared.errors` classes, never `HTTPException`: `NotFound` 404, `Conflict`
+    409, `PermissionDenied` 403, `Unauthenticated` 401, `ValidationFailed` 422,
+    `RateLimited` 429, `Unavailable` 503.
+  - Anything unexpected becomes a generic 500 with the `request_id`. Only the exception
+    type is logged.
+- Status codes: 400 malformed, 401 session, 403 role/origin/CSRF, 404 not in this
+  workspace, 409 conflict/preview required/stale digest/`row_version` mismatch, 413, 415,
+  422 validation or schema-invalid attributes, 429, 503 upstream.
+- Every response carries `X-Request-ID` (echoed if the client sent a valid one), and logs
+  use the same id.
 - `POST` creates (201 + `Location`), `PATCH` partially updates, `PUT` replaces, `DELETE`
   removes (soft delete). The security middleware accepts these methods, and a bodiless
   DELETE must not fail the content-type check.
-- Pagination: `?limit=` (max 100) and `&cursor=` (keyset) for new endpoints; keep
-  `limit/offset` only where it already exists. Keep sort order stable.
+- Pagination: `?limit=` (default 50, max 100) and `&cursor=` (opaque keyset cursor over a
+  stable sort, usually `(created_at, id)`) for new endpoints. Keep `limit/offset` only
+  where it already exists. Never page with `OFFSET` in selectors.
+- **Validation happens at three levels:**
+  - API schemas: types, lengths, `extra="forbid"`.
+  - Services: business rules, pack JSON Schemas, role checks.
+  - Database: `CHECK`, FKs, RLS, which are the last safety net.
 - Mutations that can repeat (publish, work item creation, uploads) accept an
   `Idempotency-Key` header.
 
@@ -487,11 +533,17 @@ Rules:
   async on psycopg 3** for new code.
   - ORM models live only in `modules/<module>/infrastructure/models.py`, built on
     `shared/db/base.py` (`Base`, `IdMixin`, `TenantMixin`, `AuthoringMixin`, one schema per
-    module). Domain objects stay pure (Pydantic/dataclasses); repositories map between them.
+    module). Services and selectors use them directly. `domain/` stays pure and holds
+    only real business rules.
   - Every tenant unit of work runs inside `tenant_transaction(...)`, one short session per
-    request or job. Never share sessions across tenants or requests.
-  - Avoid N+1 queries: explicit `select()`, `selectinload` for lists; no lazy loading in API
-    code.
+    request or job, provided by `entrypoints/http/deps.py`. Never share sessions across
+    tenants or requests.
+  - **No N+1 queries, enforced:**
+    - Every `relationship()` is declared `lazy="raise"`, so an accidental lazy load fails
+      loudly in tests.
+    - Selectors load related rows explicitly (`selectinload` / `joinedload`) and select only
+      the columns a list needs.
+    - Every list endpoint has a query-count test (`tests/support/queries.py`).
   - Hot paths (the voice runtime's release read) may use Core or `text()`. Never build SQL
     by string formatting with user input.
   - Privileged writes go through `SECURITY DEFINER` functions with `search_path = ''`.

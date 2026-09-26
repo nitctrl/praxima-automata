@@ -56,11 +56,16 @@ def _violations() -> set[tuple[str, str]]:
                 bad.add((module, target))  # rule 5
             if module.startswith("praxima.runtime") and target.startswith("fastapi"):
                 bad.add((module, target))  # rule 5
-            orm_allowed = module.startswith("praxima.shared.db") or ".infrastructure." in (
-                f"{module}."
-            )
+            layer = f"{module}."
+            # entrypoints.http owns the per-request session that routers receive.
+            orm_allowed = module.startswith(
+                ("praxima.shared.db", "praxima.entrypoints.http")
+            ) or any(f".{name}." in layer for name in ("application", "infrastructure"))
             if target.split(".")[0] in ("sqlalchemy", "alembic") and not orm_allowed:
-                bad.add((module, target))  # ADR 0001: ORM only in shared/db and infrastructure
+                bad.add((module, target))  # §4.4 rule 3: SQLAlchemy only below the routers
+            http_free = in_modules and any(f".{n}." in layer for n in ("application", "domain"))
+            if http_free and target.split(".")[0] in ("fastapi", "starlette"):
+                bad.add((module, target))  # services/selectors raise errors, never HTTP
     return bad
 
 
