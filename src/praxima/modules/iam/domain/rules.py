@@ -23,6 +23,9 @@ PERMISSIONS = {
     "agents:read": "viewer",
     "agents:write": "manager",
     "phone_numbers:manage": "admin",
+    "knowledge:read": "viewer",
+    "knowledge:write": "manager",
+    "knowledge:publish": "manager",
 }
 
 

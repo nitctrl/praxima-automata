@@ -29,6 +29,13 @@ relation_types:
 # Entity types that can have weekly hours and dated exceptions.
 availability_for: [doctor, location]
 
+# Kinds of reviewed documents staff can upload.
+document_categories:
+  [about, vision, story, achievements, doctor_bio, facilities, policies, registration, other]
+
+# Kinds of live updates (announcements) staff can post.
+announcement_kinds: [information, closure, no_walk_ins, doctor_unavailable, service_unavailable]
+
 # Generic voice tools this pack enables by default (keys from the runtime tool registry).
 tools:
   - find_entities

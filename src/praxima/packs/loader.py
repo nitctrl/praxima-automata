@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 PACKS_DIR = Path(__file__).resolve().parent
 KEY = r"^[a-z][a-z0-9_]{1,62}$"
+KEY_RE = re.compile(KEY)
 SEMVER = r"^\d+\.\d+\.\d+$"
 
 # Generic voice tools the runtime implements. Packs choose from these; they never add code.
@@ -87,6 +89,8 @@ class Pack(Strict):
     relation_types: tuple[RelationTypeSpec, ...] = ()
     availability_for: tuple[str, ...] = ()
     tools: tuple[str, ...] = ()
+    document_categories: tuple[str, ...] = ()
+    announcement_kinds: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _consistent(self) -> "Pack":
@@ -103,6 +107,12 @@ class Pack(Strict):
             raise PackError(f"pack {self.key}: availability for an unknown entity type")
         if unknown := set(self.tools) - GENERIC_TOOLS:
             raise PackError(f"pack {self.key}: unknown tools {sorted(unknown)}")
+        for name, keys in (
+            ("document categories", self.document_categories),
+            ("announcement kinds", self.announcement_kinds),
+        ):
+            if len(set(keys)) != len(keys) or any(not KEY_RE.fullmatch(k) for k in keys):
+                raise PackError(f"pack {self.key}: invalid or duplicate {name}")
         return self
 
     def entity_type(self, key: str) -> EntityTypeSpec | None:

@@ -44,11 +44,24 @@ def include_name(name: str | None, type_: str, parent_names: object) -> bool:
     return name in MODULE_SCHEMAS if type_ == "schema" else True
 
 
+def _manual_index(obj: object, name: str | None) -> bool:
+    """Expression indexes marked info={"manual": True}: written in a revision by hand."""
+    table = getattr(obj, "table", None)
+    if table is None:
+        return False
+    model = target_metadata.tables.get(f"{table.schema}.{table.name}")
+    return model is not None and any(
+        index.name == name and index.info.get("manual") for index in model.indexes
+    )
+
+
 def include_object(
     obj: object, name: str | None, type_: str, reflected: bool, compare_to: object
 ) -> bool:
     # Monthly partitions are created by SQL functions, not models: never diff or drop them.
-    return not (type_ == "table" and reflected and name and PARTITION_NAME.fullmatch(name))
+    if type_ == "table" and reflected and name and PARTITION_NAME.fullmatch(name):
+        return False
+    return not (type_ == "index" and _manual_index(obj, name))
 
 
 def configure(**kwargs: object) -> None:

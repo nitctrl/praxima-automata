@@ -1,1 +1,115 @@
-"""Reviewed knowledge and the retrieval corpus: documents, sections, FAQs, announcements."""
+"""Reviewed knowledge and the retrieval corpus: documents, sections, FAQs, announcements.
+
+Public interface for other modules and entrypoints.
+"""
+
+from typing import TYPE_CHECKING
+
+from praxima.shared.lazy import lazy_exports
+
+if TYPE_CHECKING:  # real imports for type checkers; loaded lazily at runtime
+    from praxima.modules.knowledge.application.ports import (
+        IndexedChunk,
+        KnowledgeIndex,
+    )
+    from praxima.modules.knowledge.application.selectors import (
+        AnnouncementView,
+        DocumentView,
+        FaqView,
+        SearchHit,
+        SectionView,
+        VersionView,
+        announcements_page,
+        documents_page,
+        faqs_page,
+        get_announcement,
+        get_document,
+        get_faq,
+        get_version,
+        search_knowledge,
+    )
+    from praxima.modules.knowledge.application.services import (
+        AnnouncementChanges,
+        AnnouncementDraft,
+        FaqChanges,
+        FaqDraft,
+        SectionDraft,
+        archive_document,
+        create_announcement,
+        create_faq,
+        delete_announcement,
+        delete_faq,
+        replace_sections,
+        set_version_status,
+        update_announcement,
+        update_faq,
+        upload_document,
+    )
+
+_EXPORTS = {
+    "IndexedChunk": "praxima.modules.knowledge.application.ports",
+    "KnowledgeIndex": "praxima.modules.knowledge.application.ports",
+    "AnnouncementView": "praxima.modules.knowledge.application.selectors",
+    "DocumentView": "praxima.modules.knowledge.application.selectors",
+    "FaqView": "praxima.modules.knowledge.application.selectors",
+    "SearchHit": "praxima.modules.knowledge.application.selectors",
+    "SectionView": "praxima.modules.knowledge.application.selectors",
+    "VersionView": "praxima.modules.knowledge.application.selectors",
+    "announcements_page": "praxima.modules.knowledge.application.selectors",
+    "documents_page": "praxima.modules.knowledge.application.selectors",
+    "faqs_page": "praxima.modules.knowledge.application.selectors",
+    "get_announcement": "praxima.modules.knowledge.application.selectors",
+    "get_document": "praxima.modules.knowledge.application.selectors",
+    "get_faq": "praxima.modules.knowledge.application.selectors",
+    "get_version": "praxima.modules.knowledge.application.selectors",
+    "search_knowledge": "praxima.modules.knowledge.application.selectors",
+    "AnnouncementChanges": "praxima.modules.knowledge.application.services",
+    "AnnouncementDraft": "praxima.modules.knowledge.application.services",
+    "FaqChanges": "praxima.modules.knowledge.application.services",
+    "FaqDraft": "praxima.modules.knowledge.application.services",
+    "SectionDraft": "praxima.modules.knowledge.application.services",
+    "archive_document": "praxima.modules.knowledge.application.services",
+    "create_announcement": "praxima.modules.knowledge.application.services",
+    "create_faq": "praxima.modules.knowledge.application.services",
+    "delete_announcement": "praxima.modules.knowledge.application.services",
+    "delete_faq": "praxima.modules.knowledge.application.services",
+    "replace_sections": "praxima.modules.knowledge.application.services",
+    "set_version_status": "praxima.modules.knowledge.application.services",
+    "update_announcement": "praxima.modules.knowledge.application.services",
+    "update_faq": "praxima.modules.knowledge.application.services",
+    "upload_document": "praxima.modules.knowledge.application.services",
+}
+__getattr__, __dir__ = lazy_exports(__name__, _EXPORTS)
+__all__ = [
+    "AnnouncementChanges",
+    "AnnouncementDraft",
+    "AnnouncementView",
+    "DocumentView",
+    "FaqChanges",
+    "FaqDraft",
+    "FaqView",
+    "IndexedChunk",
+    "KnowledgeIndex",
+    "SearchHit",
+    "SectionDraft",
+    "SectionView",
+    "VersionView",
+    "announcements_page",
+    "archive_document",
+    "create_announcement",
+    "create_faq",
+    "delete_announcement",
+    "delete_faq",
+    "documents_page",
+    "faqs_page",
+    "get_announcement",
+    "get_document",
+    "get_faq",
+    "get_version",
+    "replace_sections",
+    "search_knowledge",
+    "set_version_status",
+    "update_announcement",
+    "update_faq",
+    "upload_document",
+]

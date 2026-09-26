@@ -1278,7 +1278,7 @@ tests/db/                       # isolation, constraints, partitions, append-onl
 
 | Decision | Default in this document | Alternative |
 | --- | --- | --- |
-| Vector store | pgvector, `vector(384)` (fits today's `BAAI/bge-small-en-v1.5`) | keep Qdrant; drop `embedding` from `chunks` |
+| Vector store | ✅ **decided: Qdrant** (2026-09-27); `chunks` has no `embedding` column (§18) | — |
 | Embedding models per workspace | one model platform-wide | per-model chunk tables if models must differ |
 | Staff identity | own `iam` tables; Supabase Auth or OIDC linked via `identities` | Supabase Auth only |
 | Dashboard session store | Redis (shared, TTL) | `iam.sessions` table |
@@ -1401,3 +1401,35 @@ Built and tested against a real PostgreSQL 16 (`tests/test_agents_catalog_db.py`
   rather than JSON `null`. A test enforces this for every model.
 - **Attribute validation:** jsonschema messages are replaced by value-free ones (for example
   "has the wrong type"), because submitted values may be personal data.
+
+## 18. Implemented (revision 0004: knowledge)
+
+Built and tested against a real PostgreSQL 16 (`tests/test_knowledge_db.py`).
+
+- **Vector store: Qdrant.**
+  - `knowledge.chunks` has no `embedding` column. Vectors live in Qdrant, in their own
+    collection `praxima_knowledge` (separate from the voice agent's), and the point id is
+    the chunk id.
+  - Every point carries `workspace_id`, and every search, write and delete filters on it:
+    Qdrant has no row-level security.
+  - Semantic hits are only **candidates**, re-checked against live, RLS-visible chunks in
+    Postgres, so the vector store can never widen what a workspace sees.
+  - `chunks.embedding_model` records which model indexed a chunk; it is NULL if indexing
+    was skipped.
+- **Keyword search is always available:** the `ix_chunks_full_text` GIN index on
+  `to_tsvector('simple', …)`. It is marked `info={"manual": True}` in the model, because
+  Alembic cannot diff expression indexes.
+- **Publishing never waits for Qdrant.** If indexing fails, the version is still published
+  and searchable by keywords.
+- **Versions:**
+  - `document_versions` uses the standard authoring columns; `created_by` is the uploader.
+  - Only versions in `needs_review` can have their sections edited; published versions are
+    frozen, and a change means a new upload.
+  - Publishing a version supersedes the previous live one, removes its vectors, and
+    rebuilds the chunks.
+- **Sections and chunks** have a DELETE RLS policy: sections are replaced as a whole, and
+  chunks are rebuilt on publish. Every other knowledge table has none.
+- **Packs** now declare `document_categories` and `announcement_kinds` (validated on upload
+  and on create).
+- **Announcements** store `valid_during` as a non-empty `[start, end)` range. The
+  `active_at` filter uses range containment.
