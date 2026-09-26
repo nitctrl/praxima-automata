@@ -4,7 +4,7 @@ import ast
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "src"
-IO_LIBRARIES = ("psycopg", "httpx", "qdrant_client", "google", "livekit", "fastembed")
+IO_LIBRARIES = ("psycopg", "httpx", "qdrant_client", "google", "livekit", "fastembed", "sqlalchemy")
 
 # Temporary violations left by the step-1 move (no behaviour change). Remove an entry when
 # the code is fixed; the test fails if an entry is stale or a new violation appears.
@@ -56,6 +56,11 @@ def _violations() -> set[tuple[str, str]]:
                 bad.add((module, target))  # rule 5
             if module.startswith("praxima.runtime") and target.startswith("fastapi"):
                 bad.add((module, target))  # rule 5
+            orm_allowed = module.startswith("praxima.shared.db") or ".infrastructure." in (
+                f"{module}."
+            )
+            if target.split(".")[0] in ("sqlalchemy", "alembic") and not orm_allowed:
+                bad.add((module, target))  # ADR 0001: ORM only in shared/db and infrastructure
     return bad
 
 

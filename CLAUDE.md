@@ -124,11 +124,16 @@ uv run src/agent.py start                 # LiveKit worker
 uv run python scripts/dashboard.py        # dashboard API on http://127.0.0.1:8080 (JSON only)
 docker compose up -d qdrant               # optional semantic search (today)
 
+uv run alembic upgrade head               # apply new-schema revisions (DB_OWNER_DATABASE_URL)
+uv run alembic upgrade head --sql         # print the SQL only (review / squawk), no database
+uv run alembic revision --autogenerate --rev-id 0002 -m "iam and tenancy"   # draft; review it
+
 uv run ruff format --check src scripts tests
 uv run ruff check src scripts tests
 uv run mypy                               # strict
 uv run pytest -q                          # unit and API tests; DB tests are skipped
 uv run pytest -q --development-project=<dev-project-ref>   # opt-in real DB tests
+PRAXIMA_TEST_DATABASE_URL=postgresql+psycopg://… uv run pytest -q   # + new-schema DB tests
 
 uv run python scripts/database.py {migrate|seed|provision-runtime|status} \
     --confirm-development-project <dev-project-ref>
@@ -193,8 +198,9 @@ Dependency rules (enforce in review; add `import-linter` contracts when the move
 1. `domain/` imports only `shared.kernel` and the stdlib/pydantic. No I/O, env or clock
    reads (inject time).
 2. `application/` depends on `domain/` and **ports**, never on concrete clients.
-3. `infrastructure/` is the only layer that imports `psycopg`, `httpx`, provider SDKs,
-   `qdrant_client`, `google.genai`, `livekit` or `fastembed`.
+3. `infrastructure/` is the only layer that imports `psycopg`, `sqlalchemy`, `httpx`,
+   provider SDKs, `qdrant_client`, `google.genai`, `livekit` or `fastembed`. The exception
+   is `shared/db` for SQLAlchemy (`tests/test_architecture.py` enforces this).
 4. **Modules talk to each other only through their `application` public interface** (the
    names exported in `module/__init__.py`) or through domain events. Never import another
    module's `infrastructure/` or `domain/` internals, and never query another module's
@@ -297,8 +303,10 @@ praxima-automata/
 │   ├── database/                  # database-schema.md (target model + DBML ERD)
 │   ├── packs/                     # how to author a domain pack
 │   └── runbooks/                  # deploy, rollback, backup/restore, key rotation, incidents
-├── db/                            # target: vendor-neutral PostgreSQL
-│   ├── migrations/                # NNNN_description.sql, forward-only, checksummed
+├── alembic.ini                    # Alembic config (URL only from DB_OWNER_DATABASE_URL)
+├── db/                            # target: vendor-neutral PostgreSQL (ADR 0001)
+│   ├── migrations/                # Alembic: env.py, script.py.mako
+│   │   └── versions/              # NNNN_description.py, forward-only, numbered
 │   └── seeds/                     # platform seeds; pack demo data lives in packs/*/seeds
 ├── supabase/migrations/           # CURRENT schema, frozen once db/ takes over
 ├── sip/                           # LiveKit SIP dispatch rules
@@ -311,7 +319,8 @@ praxima-automata/
 │       │   ├── config.py          # typed settings, validated at startup
 │       │   ├── logging.py         # structured, PII-free logging + correlation ids
 │       │   ├── security/          # PII envelope encryption, HMAC lookup, hashing
-│       │   ├── db/                # connection pool, tenant scope (SET LOCAL), transactions, outbox
+│       │   ├── db/                # base.py (ORM base, mixins), engine.py (sessions,
+│       │   │                      # tenant_transaction), registry.py, pool.py (legacy), outbox
 │       │   └── events.py          # domain event base + in-process bus
 │       ├── modules/
 │       │   ├── iam/
@@ -391,7 +400,8 @@ praxima-automata/
 4. **Extract the clinic pack:** move clinic vocabulary, policy, prompts and fixtures into
    `packs/clinic/`. Core tests must pass with no clinic words in core code.
 5. **New data model:** only once `docs/database/database-schema.md` is signed off (§14 open
-   decisions resolved). Add `db/` migrations, swap repository implementations, and bump the
+   decisions resolved). Add Alembic revisions and ORM models module by module, swap
+   repository implementations, and bump the
    release `schema_version` to 4. Existing data is fictional, so re-seed from
    `packs/clinic/seeds/` rather than migrating data. Keep the old schema until the voice path
    is verified on the new one.
@@ -435,8 +445,16 @@ Rules:
 - Plural kebab-case resources; the tenant is in the path and **re-authorized** on every
   request against memberships. Never put table names in URLs.
 - Pydantic request and response models (`extra="forbid"` on input) with `response_model`
-  declared. OpenAPI and `/docs` are served in **dev only**; the frontend may generate types
-  from it.
+  declared. **The OpenAPI spec is part of the contract:** CI generates and versions it, and
+  it is published to integrators. The frontend generates its types from it. The interactive
+  `/docs` UI is served in **dev only**.
+- **Two kinds of caller:** staff browsers (session cookie + CSRF + Origin check) and
+  machines such as CRM integrations and partner systems (`Authorization: Bearer <api key>`;
+  scoped, expiring and hashed at rest in `iam.api_keys`; no cookies, so no CSRF). Every
+  request resolves to one principal with a tenant scope, and the same permission checks
+  apply to both.
+- **Webhooks and CRM sync** go out through the transactional outbox (retries, signatures,
+  idempotent delivery). Inbound CRM calls use API keys and `Idempotency-Key`.
 - Auth and roles are FastAPI dependencies (`Depends(require_role(Role.MANAGER))`).
   Permissions are named actions (`entities:write`, `pii:reveal`), mapped to roles in one
   place.
@@ -465,9 +483,20 @@ Rules:
 - **Models:** Pydantic v2, `extra="forbid"` for untrusted input. Validate once at the
   boundary, then pass typed objects. Validate entity and work item payloads against their
   pack JSON Schema.
-- **Persistence:** no ORM; psycopg with **parameterized SQL only**, inside repositories.
-  Table names live only in `infrastructure/`. Privileged writes go through `SECURITY
-  DEFINER` functions with `search_path = ''`.
+- **Persistence** (ADR `docs/architecture/0001-sqlalchemy-and-alembic.md`): **SQLAlchemy 2.0
+  async on psycopg 3** for new code.
+  - ORM models live only in `modules/<module>/infrastructure/models.py`, built on
+    `shared/db/base.py` (`Base`, `IdMixin`, `TenantMixin`, `AuthoringMixin`, one schema per
+    module). Domain objects stay pure (Pydantic/dataclasses); repositories map between them.
+  - Every tenant unit of work runs inside `tenant_transaction(...)`, one short session per
+    request or job. Never share sessions across tenants or requests.
+  - Avoid N+1 queries: explicit `select()`, `selectinload` for lists; no lazy loading in API
+    code.
+  - Hot paths (the voice runtime's release read) may use Core or `text()`. Never build SQL
+    by string formatting with user input.
+  - Privileged writes go through `SECURITY DEFINER` functions with `search_path = ''`.
+  - Today's voice and dashboard code still uses psycopg and PostgREST until each module is
+    migrated.
 - **IDs and time:** UUIDv7 (time-ordered), `timestamptz`, validity as ranges. Inject a clock
   instead of calling `datetime.now()` in domain code.
 - **External calls:** every call has a timeout. Retry only idempotent operations, with
@@ -479,17 +508,30 @@ Rules:
   embeddings).
 - **State:** in-process session and rate-limit stores are single-worker only. Moving to
   multiple workers requires a shared store (e.g. Redis); that is a production gate.
-- **Dependencies:** pinned in `uv.lock`. Don't upgrade unrelated packages, and don't add a
-  second web framework or an ORM without an ADR.
+- **Dependencies:** pinned in `uv.lock`. Don't upgrade unrelated packages, and don't add
+  another web framework or ORM without an ADR.
 
 ---
 
 ## 8. Data and migrations
 
 - **Current:** `supabase/migrations/YYYYMMDDNNNN_*.sql`, run with `scripts/database.py`.
-  **Target:** vendor-neutral PostgreSQL 16+ in `db/migrations/NNNN_*.sql`, designed in
-  `docs/database/database-schema.md`. Schema changes go into that document first, then into
-  a migration.
+  **Target:** vendor-neutral PostgreSQL 16+ managed by **Alembic**
+  (`db/migrations/versions/NNNN_*.py`), designed in `docs/database/database-schema.md`.
+  Schema changes go into that document first, then into a revision. The target is a
+  **Always an external PostgreSQL 16+, never Docker**: a local Postgres install or a
+  Supabase Postgres database, reached through `DB_OWNER_DATABASE_URL`. Use a direct or
+  session-pooler connection on port 5432, never the transaction pooler. Alembic touches only
+  the module schemas, so the new schema can sit next to the legacy `public` schema in the
+  same Supabase database. A separate database is still preferred.
+- Alembic workflow:
+  - Create revisions with `--rev-id NNNN` (next number) and **review every autogenerated
+    draft**.
+  - Write RLS policies, grants, `SECURITY DEFINER` functions, triggers, exclusion
+    constraints and partitions by hand with `op.execute()`; autogenerate can't produce them.
+  - Revisions are self-contained: don't import application code, freeze constants inside.
+  - `downgrade()` always raises (forward-only).
+  - Lint the output of `alembic upgrade head --sql` with **squawk** in CI.
 - Migrations are forward-only and **never edited once applied**. Use expand/contract for
   breaking changes. Avoid unsafe locks: `CREATE INDEX CONCURRENTLY`, `NOT VALID` then
   `VALIDATE`.
@@ -526,7 +568,10 @@ Rules:
 - **Pack parity:** the same runtime and API test flows run against every pack's fictional
   seeds (clinic and real estate), which proves the core is domain-neutral.
 - DB tests (`integration` marker) are opt-in against a dedicated dev database, with
-  fictional data only. A skipped test is not evidence.
+  fictional data only. New-schema tests run when `PRAXIMA_TEST_DATABASE_URL` points to a
+  **disposable** database on an external Postgres 16+, e.g. `createdb praxima_test` on
+  your local Postgres. Never point it at a shared or production database. A skipped test is not
+  evidence.
 - Before finishing: ruff format check, ruff check, mypy, pytest. If the API contract
   changed, also run `pnpm test` in `../frontend`.
 

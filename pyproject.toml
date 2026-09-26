@@ -22,6 +22,8 @@ dependencies = [
     "python-docx>=1.1,<2",
     "livekit-plugins-google>=1.8.2",
     "google-genai>=2.25.0",
+    "sqlalchemy[asyncio]>=2.0.36,<2.1",
+    "alembic>=1.14,<2",
 ]
 
 [project.optional-dependencies]
@@ -39,7 +41,7 @@ build-backend = "hatchling.build"
 packages = ["src/praxima"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/praxima", "src/agent.py", "tests", "scripts", "supabase", "docs", "pyproject.toml", "uv.lock", "README.md", ".env.example"]
+include = ["src/praxima", "src/agent.py", "db", "alembic.ini", "tests", "scripts", "supabase", "docs", "pyproject.toml", "uv.lock", "README.md", ".env.example"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -51,7 +53,7 @@ markers = ["integration: explicit opt-in tests against the dedicated development
 target-version = "py310"
 line-length = 100
 # Keep formatting changes out of the existing voice POC.
-include = ["src/praxima/**/*.py", "tests/**/*.py", "scripts/**/*.py"]
+include = ["src/praxima/**/*.py", "tests/**/*.py", "scripts/**/*.py", "db/**/*.py"]
 # The restored voice POC worker keeps its original formatting (was src/agent.py).
 extend-exclude = ["src/praxima/entrypoints/voice_worker.py"]
 
@@ -60,7 +62,7 @@ select = ["E", "F", "I", "UP"]
 
 [tool.mypy]
 python_version = "3.10"
-files = ["src/praxima", "scripts"]
+files = ["src/praxima", "scripts", "db/migrations"]
 # Untyped voice POC worker, unchecked as before the move (was src/agent.py).
 exclude = ["src/praxima/entrypoints/voice_worker\\.py$"]
 mypy_path = "src"

@@ -2,7 +2,7 @@
 
 Status: **revised draft for sign-off** (2026-09-26). It supersedes the first draft of this
 document, and `docs/database-design-plan.md` remains the planning history. SQL migrations are
-implemented separately in `db/migrations/`. §15 lists what changed and why.
+implemented separately as Alembic revisions in `db/migrations/versions/` (ADR 0001). §15 lists what changed and why.
 
 ## 1. Purpose
 
@@ -54,7 +54,7 @@ Table classes:
 | --- | --- | --- | --- |
 | **Tenant** | `NOT NULL` | entities, documents, conversations, work items | app roles, RLS by workspace |
 | **Organization-scoped** | nullable (null means organization-wide) | memberships, api_keys, audit_log | RLS by organization; never the target of a tenant composite FK |
-| **Platform** | none | pack_versions, rate_cards, jobs, schema_migrations | read-only to app roles, or worker/owner only |
+| **Platform** | none | pack_versions, rate_cards, jobs, alembic_version | read-only to app roles, or worker/owner only |
 
 Rule: **a table in the tenant FK graph never has a nullable `workspace_id`.** Shared
 templates (pack entity types, work item kinds) are **installed (copied) into each workspace**
@@ -100,7 +100,7 @@ residency.
 | `engagement` | `contacts`, `consents`, `conversations`, `call_events`, `work_item_kinds`, `work_items`, `work_item_events`, `tasks` | Caller interactions and staff follow-up |
 | `billing` | `rate_cards`, `workspace_rate_overrides`, `usage_events`, `usage_rollups` | Metering and cost |
 | `audit` | `audit_log` | Append-only security and business audit trail |
-| `ops` | `outbox_events`, `idempotency_keys`, `jobs`, `schema_migrations` | Shared operational infrastructure |
+| `ops` | `outbox_events`, `idempotency_keys`, `jobs`, `alembic_version` | Shared operational infrastructure |
 
 ## 6. Core relationships
 
@@ -1013,10 +1013,9 @@ Table ops.jobs {
   }
 }
 
-Table ops.schema_migrations {
-  version text [pk]
-  checksum text [not null]
-  applied_at timestamptz [not null]
+Table ops.alembic_version {
+  version_num varchar(32) [pk]
+  Note: 'Managed by Alembic (ADR 0001); records the applied revision.'
 }
 
 ///////////////////////////////////////////////////////
@@ -1264,9 +1263,10 @@ docs/database/
 ├── database-schema.md          # this document (agreed schema)
 └── erd.dbml                    # optional: §8 extracted for dbdiagram.io
 db/
-├── migrations/                 # 0001_foundation.sql, 0002_iam_tenancy.sql, 0003_catalog.sql,
-│                               # 0004_knowledge.sql, 0005_agents_releases.sql,
-│                               # 0006_engagement.sql, 0007_billing_audit_ops.sql, ...
+├── migrations/                 # Alembic (ADR 0001): env.py, script.py.mako
+│   └── versions/               # 0001_foundation.py (done), 0002_iam_tenancy.py, 0003_catalog.py,
+│                               # 0004_knowledge.py, 0005_agents_releases.py,
+│                               # 0006_engagement.py, 0007_billing_audit_ops.py, ...
 └── seeds/platform.sql          # platform data only (roles, rate cards, pack registry)
 src/praxima/packs/<pack>/seeds/ # fictional domain demo data, kept with its pack
 supabase/migrations/            # current schema, frozen during the transition
