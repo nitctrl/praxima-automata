@@ -1,33 +1,45 @@
-# Project Understanding: AI Clinic Receptionist (praxima-automata)
+# Project Understanding: Praxima (praxima-automata backend)
 
-A guided tour of how the project works end to end: what happens when someone calls,
-how the agent talks to the database, and how it produces an answer.
+A guided tour of how the project works end to end: what happens when someone calls, how the
+agent talks to the database and produces an answer, and how the new multi-tenant platform
+(REST API, CRM, staff console) is built around it.
 
 Everything below was traced from the source code. File references use `path:line` so you
 can jump to the real code. `.env` and `.env.runtime` were **not** read while writing this;
 only the code that loads them was.
 
+> **Last updated 2026-09-27**, after restructure steps 1–3, 5a and 5b (backend) and the
+> `/api/v1` console (frontend). Step 4 (releases) has not started.
+
 ---
 
 ## 1. What this project is
 
-A **voice AI receptionist for a clinic**. A caller speaks (by phone or microphone); the
-agent understands the speech, looks up **published clinic information**, and speaks a short
-answer back in Hindi or English.
+A **multi-tenant voice-agent platform**. A caller speaks by phone or microphone. The agent
+understands the speech, looks up **published information**, and speaks a short answer back
+in Hindi or English. It captures requests for staff to follow up and never makes
+commitments itself. The first customer type is a clinic; others (real estate, …) come as
+**domain packs**, which are configuration rather than code (see `CLAUDE.md` §4.6).
 
 It is an **administrative** assistant only. It never diagnoses, prescribes, or confirms
-appointments. The current build is a **development foundation for a fictional "Clinic A"**,
-not a production medical service.
+appointments.
 
-The project has **two halves** that meet at one database table:
+Today the repository holds **two generations side by side**. They share nothing at runtime
+yet:
 
-| Half | Who uses it | What it does |
-| --- | --- | --- |
-| **Authoring side** (FastAPI dashboard) | Clinic staff | Write facts, upload documents, preview, **publish** |
-| **Runtime side** (LiveKit voice agent) | Callers | Load the published version, answer questions from it |
+| Generation | Status | Data | Who uses it |
+| --- | --- | --- | --- |
+| **A. Live voice path** (legacy) | Working; answers calls for the fictional "Clinic A" | Supabase `public.*` tables, one published JSON snapshot | Callers (via `src/agent.py`) and the legacy `/api/*` dashboard routes |
+| **B. New platform** | Steps 1–3 and 5 built and tested; not yet read by the voice agent | New PostgreSQL schemas (`iam`, `tenancy`, `catalog`, `knowledge`, `engagement`, …) managed by Alembic | Staff, through the REST API `/api/v1` and the Next.js console in `../frontend` |
 
-The bridge between them is the **published snapshot**: one immutable JSON document stored in
-`public.configuration_versions`.
+**Step 4 (releases)** is the bridge. It will build the agent's published snapshot from the
+new schema, and the voice agent will then read that instead of `public.configuration_versions`.
+It changes the AI's data source, so it waits for explicit approval. Until then the AI code
+is deliberately untouched, and `tests/test_architecture.py` proves the voice worker loads no
+platform code.
+
+Sections 4–8 describe **A** (still exactly how calls work). Sections 9–11 describe **B** and
+the console.
 
 ---
 
@@ -43,32 +55,40 @@ flowchart LR
         W[Voice worker<br/>src/agent.py<br/>agent name: inbound-agent]
     end
     subgraph Providers
-        STT[Sarvam STT<br/>saaras:v3]
-        LLM[Google Gemini<br/>gemini-2.5-flash]
-        TTS[Sarvam TTS<br/>bulbul:v3]
+        STT[Sarvam STT]
+        LLM[Google Gemini]
+        TTS[Sarvam TTS]
     end
-    subgraph Data
-        PG[(Supabase Postgres<br/>configuration_versions)]
-        Q[(Qdrant<br/>optional vectors)]
+    subgraph "A. Legacy data"
+        PG[(Supabase Postgres public.*<br/>configuration_versions)]
+        Q[(Qdrant: voice collection)]
     end
-    subgraph Staff side
-        D[FastAPI dashboard<br/>scripts/dashboard.py]
-        S[Staff browser]
+    subgraph "B. New platform"
+        API[FastAPI /api/v1<br/>scripts/dashboard.py]
+        NEW[(PostgreSQL 16+<br/>iam, tenancy, agents, catalog,<br/>knowledge, engagement, audit, ops)]
+        QK[(Qdrant: praxima_knowledge)]
+    end
+    subgraph Staff
+        FE[Next.js console<br/>../frontend]
     end
 
     C --> SIP --> W
     W <--> STT
     W <--> LLM
     W <--> TTS
-    W -- "1x at call start<br/>read published snapshot" --> PG
-    W -. "semantic ranking<br/>per question" .-> Q
-    S --> D
-    D -- "author / preview / publish" --> PG
-    D -- "index on publish" --> Q
+    W -- "1x at call start" --> PG
+    W -. "semantic ranking" .-> Q
+    FE -- "/api/* same-origin proxy" --> API
+    API -- "RLS-scoped SQLAlchemy" --> NEW
+    API -. "index / search" .-> QK
+    NEW -. "step 4: releases (not built)" .-> W
 ```
 
-Key idea: **the database is read once per call, at the start.** After that the whole
-knowledge base lives in the worker's memory for the duration of the call.
+Key ideas:
+- For calls, **the database is read once, at the start**. After that the whole knowledge
+  base lives in the worker's memory for the call.
+- For staff, **every request is scoped to one workspace** by row-level security in Postgres,
+  not only by application code.
 
 ---
 
@@ -76,21 +96,23 @@ knowledge base lives in the worker's memory for the duration of the call.
 
 | Layer | Technology |
 | --- | --- |
-| Language / tooling | Python 3.10+, `uv`, pytest, ruff, mypy |
+| Language / tooling | Python 3.10+ (venv 3.12), `uv`, pytest, ruff, mypy (strict) |
 | Voice framework | LiveKit Agents (`livekit-agents`) |
 | Speech-to-text / text-to-speech | Sarvam (`saaras:v3`, `bulbul:v3`), Hindi-first |
 | VAD / turn detection | Silero VAD + LiveKit multilingual turn detector |
 | Noise cancellation | LiveKit BVC (mic) / BVCTelephony (phone) |
 | LLM | Google Gemini via `livekit-plugins-google` (default `gemini-2.5-flash`, temperature 0) |
-| Database | Supabase Postgres, accessed with `psycopg` (async pool), no ORM |
-| Auth (dashboard) | Supabase Auth, publishable key only |
-| Vector search (optional) | Qdrant + `fastembed` (`BAAI/bge-small-en-v1.5`) |
-| Dashboard | FastAPI JSON API; UI is a separate Next.js app (`../frontend`) |
+| Legacy database (A) | Supabase Postgres, `psycopg` async pool, no ORM |
+| New database (B) | External PostgreSQL 16+ (local install or Supabase, **never Docker**), **SQLAlchemy 2.0 async** + psycopg 3, **Alembic** migrations in `db/migrations/` |
+| Auth | Supabase Auth checks passwords; the API keeps its own opaque `praxima_session` cookie + CSRF token |
+| Vector search (optional) | Qdrant + `fastembed` (legacy voice collection; new `praxima_knowledge` collection) |
+| HTTP API | FastAPI: legacy `/api/*` routes plus the REST `/api/v1` |
+| Staff UI | Next.js 16 console in `../frontend` (see its `PROJECT_UNDERSTANDING.md`) |
 | Telephony | Plivo PSTN -> LiveKit SIP (`sip/dispatch-rule.json`) |
 
 ---
 
-## 4. End to end: what happens when someone calls
+## 4. [A] End to end: what happens when someone calls
 
 ### Step 0. Before any call: staff publish knowledge
 
@@ -192,7 +214,7 @@ No database query happens in this loop. Retrieval runs against the snapshot alre
 
 ---
 
-## 5. How the answer is produced
+## 5. [A] How the answer is produced
 
 ### 5.1 The system prompt
 
@@ -273,9 +295,10 @@ comes from the in-memory snapshot.
 
 ---
 
-## 6. How the project interacts with the database
+## 6. [A] How the voice path interacts with the database
 
-There are three distinct database "actors", each with different power.
+There are three distinct database "actors" on the legacy schema, each with different power.
+(The new platform's roles are in section 9.3.)
 
 | Actor | Credential | Used by | Can do |
 | --- | --- | --- | --- |
@@ -322,10 +345,15 @@ Guarantees enforced in SQL:
 
 ---
 
-## 7. The authoring side: how knowledge gets published
+## 7. [A] The legacy authoring side: how the voice snapshot gets published
 
 `uv run python scripts/dashboard.py` starts a FastAPI app on `http://127.0.0.1:8080`
-(`src/praxima/entrypoints/api.py`).
+(`src/praxima/entrypoints/api.py`). The same app serves the legacy `/api/*` routes described
+here **and** the new `/api/v1` (section 9).
+
+> The Next.js console now talks **only** to `/api/v1`. The legacy routes below still exist,
+> and preview/publish of the voice snapshot is only possible through them until step 4. No
+> screen in the new console calls them.
 
 ```mermaid
 flowchart TD
@@ -361,7 +389,7 @@ Details worth knowing:
 
 ---
 
-## 8. Failure behaviour (fail closed)
+## 8. [A] Failure behaviour (fail closed)
 
 | Situation | Behaviour |
 | --- | --- |
@@ -374,94 +402,289 @@ Details worth knowing:
 
 ---
 
-## 9. Built but NOT attached to the live voice agent
+## 9. [B] The new platform: `/api/v1`
 
-A large part of `src/praxima/` implements the fuller product design and is **not** used by
-`agent.py` today. The README is explicit that no custom turn handler, session orchestration,
-usage writes, request collection or transfer is attached to the live path.
+### 9.1 Shape: a modular monolith
+
+`src/praxima/` is split into modules. Each module owns **one Postgres schema of the same
+name** and has the same layers (`CLAUDE.md` §4.4):
+
+```
+modules/<m>/
+├── __init__.py        public interface (lazy exports: the voice worker never loads it)
+├── api/               router.py (endpoints only) + schemas.py (Pydantic, extra="forbid")
+├── application/       services.py (writes, one transaction) + selectors.py (reads, no N+1)
+├── domain/            pure rules (state machines, validation), no I/O
+└── infrastructure/    models.py (SQLAlchemy) + provider adapters (e.g. Qdrant)
+```
+
+A request flows `router → service | selector → models → Postgres`. Services and selectors
+raise `shared.errors` (`NotFound`, `Conflict`, `PermissionDenied`, `ValidationFailed`, …),
+which the global handlers in `entrypoints/http/errors.py` turn into RFC 9457 Problem
+Details. `tests/test_architecture.py` enforces the dependency rules. Among them: modules
+never import the runtime, routers never touch the database, and domain code does no I/O.
+
+| Module / schema | Built in | Owns |
+| --- | --- | --- |
+| `iam` | step 1 | users, external identities (Supabase subject), memberships and roles, platform admins |
+| `tenancy` | step 1 | organizations, workspaces (pack, timezone, languages), registered pack versions |
+| `audit` | step 1 | append-only, monthly-partitioned audit log |
+| `agents` | step 2 | agents (persona, safety messages, status), per-agent tools, phone numbers |
+| `catalog` | step 2 | entity types (JSON Schema from the pack), entities, relations, availability rules/exceptions |
+| `knowledge` | step 3 | documents, versions (review lifecycle), sections, chunks, FAQs, announcements (live updates) |
+| `engagement` | step 5 | contacts (encrypted), consents, conversations, call events, work item kinds, work items + history, tasks |
+| `releases` | **step 4, not built** | snapshot build → preview → publish → rollback for the voice agent |
+| `billing`, `ops` | schemas only | usage and rate cards later; outbox/idempotency/jobs |
+
+Migrations are `db/migrations/versions/0001_foundation.py` … `0005_engagement.py`. They are
+forward-only (`downgrade()` raises). Autogenerated tables are combined with hand-written SQL
+for RLS policies, triggers and partitions, and `alembic check` must show no drift.
+
+### 9.2 Tenancy: how isolation works
+
+- Hierarchy: **Organization → Workspace → Agent**. The workspace is the isolation boundary.
+- Every tenant table has `workspace_id NOT NULL`, **composite foreign keys**
+  `(workspace_id, x_id)` (a row can't point into another tenant), and **forced RLS** keyed on
+  `current_setting('app.workspace_id')`. Organization-scoped tables use `app.organization_id`.
+- `shared/db/engine.py` sets those settings with `SET LOCAL` (`set_config(..., true)`) at the
+  start of every transaction (`scoped_transaction`, `apply_scope`). Only trusted backend code
+  does this. The tenant never comes from request bodies.
+- `entrypoints/http/deps.py` → `WorkspaceAccess`:
+  1. reads the workspace id in the URL
+  2. finds the caller's role (workspace role or organization-wide role)
+  3. returns **404** if they have none, so other tenants' ids are never confirmed
+  4. scopes RLS
+  5. commits before the response is sent (`scope="function"` dependencies)
+- Shared templates (a pack's entity types and work item kinds) are **copied into each
+  workspace** when it is created. Tenants never reference each other's rows.
+
+### 9.3 Identity, roles and security
+
+- **Sign-in:**
+  1. `POST /api/v1/auth/session` checks the password with Supabase Auth.
+  2. It creates or links the user in `iam`.
+  3. It sets an opaque HttpOnly `SameSite=Strict` `praxima_session` cookie and returns a CSRF
+     token. The browser never sees an identity-provider token.
+- **Roles:** viewer < staff < manager < admin < owner. Permissions are named actions mapped
+  to a minimum role in one table (`modules/iam/domain/rules.py`, e.g. `crm:write` staff,
+  `crm:assign` manager, `pii:erase` admin). The frontend mirrors that table for display only.
+- **Middleware** (kept from the legacy app):
+  - exact `Origin` match
+  - CSRF on every non-GET
+  - content-type allow-list: JSON, or raw bytes for uploads
+  - body size limits
+  - trusted hosts
+  - `Cache-Control: no-store`
+  - `X-Request-ID` on every response
+- **Database credentials:**
+  - `DB_OWNER_DATABASE_URL` is used only by Alembic.
+  - `APP_API_DATABASE_URL` is the API's connection. Without it, `/api/v1` answers 503.
+
+### 9.4 API conventions
+
+- REST under `/api/v1`: plural kebab-case resources, with the tenant in the path.
+- A single resource returns the object; lists return `{ data, page: { limit, next_cursor } }`
+  with keyset cursors (never `OFFSET`).
+- `DELETE` returns 204. Errors are always RFC 9457 `application/problem+json` with a safe
+  `detail` and `errors[]` that never echo submitted values.
+- Editable rows carry `row_version`; a stale one gives **409**. Repeatable creations accept
+  `Idempotency-Key`.
+- Validation happens at three levels:
+  - Pydantic schemas: types, lengths, `extra="forbid"`
+  - services: business rules, pack JSON Schemas, roles
+  - database: `CHECK`, FKs, RLS
+- No N+1 queries: relationships are `lazy="raise"`, and every list endpoint has a
+  query-count test.
+- Full endpoint table: `CLAUDE.md` §6.
+
+### 9.5 Domain packs
+
+`src/praxima/packs/<key>/`:
+- `manifest.yaml`: entity types, relation types, availability types, document categories,
+  announcement kinds, work item kinds, default tools
+- `entity_types/*.json`
+- `work_items/*.json`: payload schema, stages, initial and terminal stages, subject types
+
+`packs/loader.py` validates a pack and computes a checksum. Pack versions are registered in
+`tenancy.pack_versions`. Creating a workspace (`POST /organizations/{org}/workspaces`)
+**installs** its pack's entity types and work item kinds. The clinic pack
+(`packs/clinic/`) is the only one so far; `real_estate` is the planned proof that no core
+change is needed.
+
+### 9.6 Knowledge (step 3)
+
+The review flow for a document version is:
+1. upload raw `.md`/`.docx` bytes
+2. extraction creates a version in `needs_review`
+3. staff edit the sections (`PUT .../sections`)
+4. **publish** supersedes the previous live version and rebuilds the chunks
+
+Chunks get keyword search (a Postgres GIN full-text index, always available) and optional
+semantic search in Qdrant:
+- Qdrant has its **own** collection `praxima_knowledge`, separate from the voice agent's.
+- Every Qdrant call filters on `workspace_id`.
+- Semantic hits are only candidates, re-checked against RLS-visible chunks.
+- Publishing never waits for Qdrant.
+
+FAQs (approved answers) and announcements (live updates with a `[start, end)` range) have
+a draft → published → archived status.
+
+### 9.7 CRM / engagement (step 5)
+
+- **Work items** are the requests staff follow up (the clinic pack has
+  `appointment_request` and `callback_request`):
+  - The payload is validated against the kind's JSON Schema. The clinic kinds have no
+    free-text fields.
+  - A stage move must follow the kind's stages, and closed items can't move.
+  - Every move appends a `work_item_events` row.
+  - `(workspace_id, idempotency_key)` is unique, so a retried call returns the same item.
+- **Personal data** is never stored in clear:
+  - Names, phones and staff notes are stored only as AES-GCM ciphertext, bound to
+    workspace + record + field (`PiiCipher`, `CLINIC_PII_KEYS`).
+  - Contacts also get a per-workspace HMAC lookup digest (`PRAXIMA_LOOKUP_KEY`), so returning
+    callers can be found without storing the number.
+  - Lists never include personal data. `POST .../reveal` (staff+) decrypts and writes an
+    audit row. Erasure (admin+) removes the ciphertext and keeps the history.
+  - Without the keys, those endpoints answer 503.
+- **Append-only records:** consents, work item events and call events. A trigger rejects
+  changes, and `call_events` is partitioned monthly.
+- **Conversations** are read-only in the API; the voice runtime will write them after step 4.
+
+### 9.8 Tests for the new platform
+
+DB tests run only when `PRAXIMA_TEST_DATABASE_URL` points to a **disposable** database
+(e.g. `praxima_test` on the local Postgres); otherwise they're skipped. The last full run was
+454 passed and 1 known failure. That failure is
+`test_agent_knowledge.py::test_scheduled_live_update_is_searchable_before_it_starts`, a
+time-of-day issue in AI code that is being left alone. The suite covers:
+- tenant isolation and role denial
+- CSRF and Origin checks
+- `row_version` conflicts
+- query budgets
+- append-only triggers
+- personal data never leaking into lists
+
+---
+
+## 10. [A] Built but NOT attached to the live voice agent
+
+Parts of `src/praxima/` implement the fuller product and are **not** used by `agent.py`
+today:
 
 | Module | Purpose | Status |
 | --- | --- | --- |
-| `sessions.py`, `session_tools.py`, `usage.py` | Pinned call sessions, usage units, finalization | Tested, not wired to the live agent |
-| `requests.py`, `privacy.py` | Confirmed appointment/callback requests, encrypted PII | Tested, not wired |
-| `safety.py` | Deterministic medical / emergency / prompt-injection routing | Used by dev paths, not the live LLM path |
-| `knowledge.py`, `tools.py`, `questions.py` | Structured typed lookups over doctors, fees, schedules, FAQs | Used by the fictional console test and dashboard code, **not** by the live RAG tool |
-| `dev_voice.py`, `dev_conversation.py`, `scripts/clinic_voice.py` | Deterministic console-only test adapter (no LLM) | Separate dev harness |
-| `sip_test.py`, `scripts/clinic_sip.py` | Fictional single-number SIP pilot | Rolled back / inactive |
+| `modules/engagement/application/sessions.py`, `runtime/tools/session_tools.py`, `runtime/usage.py` | Pinned call sessions, usage units, finalization (legacy schema) | Tested, not wired to the live agent |
+| `modules/engagement/domain/requests.py`, `shared/security/privacy.py` | Legacy appointment/callback requests, encrypted PII | Tested, not wired |
+| `runtime/policy/safety.py` | Deterministic medical / emergency / prompt-injection routing | Used by dev paths, not the live LLM path |
+| `modules/catalog/domain/knowledge.py`, `runtime/tools/tools.py`, `runtime/questions.py` | Structured lookups over doctors, fees, schedules, FAQs | Used by the fictional console test, **not** by the live RAG tool |
+| `dev/` (`dev_voice.py`, `dev_conversation.py`, `sip_test.py`) | Deterministic console harness; fictional SIP pilot | Dev only |
+| New platform (section 9) | CRM, catalog, knowledge, agents on the new schema | Used by `/api/v1` and the console; **not** by calls until step 4 |
 
-Consequence: calls **do not appear in the dashboard's Calls tab**, and no appointment or
-callback is stored from a live call.
+Consequences:
+- Calls **do not appear** in the console's Calls screen yet.
+- No request is created from a live call.
+- Content edited in the new console does not reach callers until step 4.
 
 ---
 
-## 10. Important observations (things that may surprise you)
+## 11. The staff console (`../frontend`)
 
-1. **Doctor/fee/schedule forms are not searched by the live agent.** They are stored and
-   included in the snapshot, but `snapshot_sections()` (`rag.py:25-44`) only indexes uploaded
+- **Stack:** Next.js 16, React 19, Tailwind 4, TanStack Query and Radix.
+- **Transport:** it proxies `/api/*` to this API on the same origin, so the cookie, Origin
+  check and CSRF all work.
+- **Screens:** Overview, Inbox (work items), Tasks, Calls, Contacts, Directory (catalog),
+  Knowledge, Live updates, Agents, Team, Settings.
+- **Pack-driven forms:** directory and request forms are generated from the pack's JSON
+  Schemas.
+- **Contract check:** every one of its 71 API calls maps onto a real `/api/v1` route, checked
+  against this app's OpenAPI.
+- **More:** its own `PROJECT_UNDERSTANDING.md` and `FRONTEND_ARCHITECTURE.md`.
+
+---
+
+## 12. Important observations (things that may surprise you)
+
+1. **Two data worlds.** Editing a doctor in the console changes `catalog.entities` (new
+   schema); the voice agent still answers from the legacy `public.configuration_versions`
+   snapshot. They converge in step 4.
+2. **Doctor/fee/schedule forms are not searched by the live agent.** They are stored and
+   included in the legacy snapshot, but `snapshot_sections()` only indexes uploaded
    **document sections** and **live-update notices**. The prompt says legacy form records are
    not knowledge sources, and git history ("Use published documents as RAG source of truth")
-   explains why. The README still says forms are rendered into the corpus; the code disagrees.
-   To make the agent answer about doctors or fees, put that information in an uploaded, reviewed
-   document.
-2. **The embedding model is English.** `BAAI/bge-small-en-v1.5` is the default
-   (`vectors.py:53`), so semantic ranking on Hindi questions is likely weaker than lexical.
-   This is an inference from the model name; I did not measure it.
-3. **The phone path is locked to hard-coded IDs** (number, trunk, rule) in `sip_test.py:28-30`.
-   Changing the phone number or trunk requires editing code.
-4. **Console mode needs `.env.runtime`.** Without the restricted runtime credentials created by
+   explains why. To make the agent answer about doctors or fees today, put that information
+   in an uploaded, reviewed document.
+3. **The embedding model is English.** `BAAI/bge-small-en-v1.5` is the default, so semantic
+   ranking on Hindi questions is likely weaker than lexical. This is an inference from the
+   model name; it wasn't measured.
+4. **The phone path is locked to hard-coded IDs** (number, trunk, rule) in `dev/sip_test.py`.
+   Changing the phone number or trunk requires editing code; in the platform this becomes
+   `agents.phone_numbers`.
+5. **Console mode needs `.env.runtime`.** Without the restricted runtime credentials created by
    `provision-runtime`, the agent runs but answers "knowledge unavailable".
-5. **`docs/product-architecture.md` is a Phase 0 design document.** Parts describe things not
-   built yet (transfers, session orchestration in the live path).
+6. **Pack vocabularies aren't exposed by the API yet** (document categories, announcement
+   kinds, relation types). The backend validates them; the console offers suggestions, and it
+   can't create directory links until relation types are exposed.
+7. **`docs/product-architecture.md` is a Phase 0 design document.** For the current target,
+   read `CLAUDE.md` and `docs/database/database-schema.md` (§16–§19 record what is built).
 
 ---
 
-## 11. Running it
+## 13. Running it
 
 ```sh
 uv sync --locked                  # install
 sudo apt install libportaudio2    # Linux, for console mic
 uv run src/agent.py download-files    # one time: turn-detector / VAD models
 
-# one time: database (dev Supabase project only)
+# A. legacy voice path: one time, dev Supabase project only
 uv run python scripts/database.py migrate --confirm-development-project <ref>
 uv run python scripts/database.py seed --confirm-development-project <ref>
 uv run python scripts/database.py provision-runtime --confirm-development-project <ref>
 
-uv run python scripts/dashboard.py    # staff dashboard, then: preview and publish
+# B. new platform schema (external Postgres 16+; DB_OWNER_DATABASE_URL in .env)
+uv run alembic upgrade head
+
+uv run python scripts/dashboard.py    # API on 127.0.0.1:8080 (legacy /api + /api/v1)
+cd ../frontend && corepack pnpm dev   # console on http://127.0.0.1:3000
 uv run src/agent.py console           # local mic test
 uv run src/agent.py start             # phone worker (run exactly one)
 ```
 
-Optional semantic search: `uv sync --extra semantic`, `docker compose up -d qdrant`, and set
-`QDRANT_URL=http://127.0.0.1:6333`.
+Keys in `.env` (see `.env.example`):
 
-Keys needed in `.env` (see `.env.example`): `LIVEKIT_*`, `GOOGLE_API_KEY`, `SARVAM_API_KEY`,
-Supabase project settings. The runtime database URL goes in `.env.runtime` (generated by
-`provision-runtime`).
+| Area | Keys |
+| --- | --- |
+| Voice | `LIVEKIT_*`, `GOOGLE_API_KEY`, `SARVAM_API_KEY` |
+| Supabase project and auth | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_PROJECT_REF` |
+| Console origin | `CLINIC_DASHBOARD_ORIGIN=http://127.0.0.1:3000` |
+| New platform | `DB_OWNER_DATABASE_URL` (migrations), `APP_API_DATABASE_URL` (API) |
+| CRM personal data | `CLINIC_PII_KEYS`, `CLINIC_PII_KEY_VERSION`, `PRAXIMA_LOOKUP_KEY` |
+| Optional semantic search | `QDRANT_URL`, with `uv sync --extra semantic` |
 
-The order that matters: **migrate -> seed -> provision runtime -> sign in -> upload/approve a
-document -> preview -> publish -> then call.**
+The runtime database URL for calls goes in `.env.runtime` (generated by `provision-runtime`).
+
+Checks: `uv run ruff format --check src scripts tests`, `uv run ruff check src scripts tests`,
+`uv run mypy`, `uv run pytest -q`. Add `PRAXIMA_TEST_DATABASE_URL=…` for the DB tests, and
+run `uv run alembic check` for migration drift.
 
 ---
 
-## 12. File map
+## 14. File map
 
 | Path | Role |
 | --- | --- |
-| `src/agent.py` | Worker entrypoint, `VoiceAgent`, providers, lifecycle |
-| `src/praxima/runtime/tools/agent_knowledge.py` | Loads the published snapshot; defines the search tool |
-| `src/praxima/modules/knowledge/application/retrieval.py` | `HybridRetriever`, corpus construction, live-update helpers |
-| `src/praxima/modules/knowledge/domain/documents.py` | Upload extraction, tokenizer, lexical index, RRF |
-| `src/praxima/integrations/vectors/qdrant.py` | Optional Qdrant + fastembed adapter |
-| `src/praxima/runtime/prompting.py` + `templates/agent_system_prompt.j2` | System prompt |
-| `src/praxima/modules/releases/domain/snapshot.py` | Typed, validated, immutable snapshot model |
-| `src/praxima/shared/db/pool.py`, `settings.py` | Restricted runtime DB pool and DSN validation |
-| `src/praxima/modules/releases/application/publication.py` | Preview / publish / rollback service |
-| `src/praxima/entrypoints/api.py` | Staff dashboard JSON API (UI lives in `../frontend`) |
-| `src/praxima/integrations/llm/gemini.py` | Gemini grounded answerer for dashboard Agent test |
-| `src/praxima/dev/sip_test.py`, `resolver.py` | SIP ingress check, called-number resolution |
-| `scripts/database.py` | Migrate / seed / provision-runtime / status |
-| `scripts/dashboard.py` | Starts the dashboard |
-| `supabase/migrations/` | Schema, RLS, publication functions |
-| `docs/` | Phase reports (architecture is a Phase 0 design) |
-| `tests/` | pytest suite (DB integration tests are opt-in) |
+| `src/agent.py` → `src/praxima/entrypoints/voice_worker.py` | Worker entrypoint, `VoiceAgent`, providers, lifecycle (AI code: unchanged) |
+| `src/praxima/runtime/` | Voice runtime: tools, prompting, speech, policy, fallbacks (AI code) |
+| `src/praxima/modules/knowledge/application/retrieval.py`, `domain/documents.py` | Legacy hybrid retrieval and document extraction used by calls |
+| `src/praxima/modules/releases/domain/snapshot.py`, `application/publication.py` | Legacy snapshot model and preview/publish |
+| `src/praxima/entrypoints/api.py` | `create_app()`: middleware, legacy `/api/*`, mounts `/api/v1` |
+| `src/praxima/entrypoints/http/` | Shared HTTP plumbing: `deps.py` (sessions, access, paging, vault), `errors.py`, `responses.py` (`Page`, `Problem`), `v1.py` (mounts routers) |
+| `src/praxima/modules/<m>/{api,application,domain,infrastructure}` | New platform modules (section 9.1) |
+| `src/praxima/shared/` | `db/` (base, engine/RLS scope, pagination, errors), `security/` (PII cipher, phone lookup), `validation.py`, `errors.py`, `lazy.py` |
+| `src/praxima/packs/` | `loader.py` + `clinic/` pack (manifest, entity types, work item kinds, prompts) |
+| `db/migrations/` | Alembic env + revisions `0001`–`0005` |
+| `supabase/migrations/` | Legacy schema (frozen once step 4 moves the voice path) |
+| `scripts/dashboard.py`, `scripts/database.py` | Start the API; legacy migrate/seed/provision |
+| `docs/database/database-schema.md` | Target data model; §16–§19 record what is implemented |
+| `CLAUDE.md` | Rules, architecture, API contract, conventions |
+| `tests/` | pytest: unit, API contract, architecture rules, opt-in DB tests |
