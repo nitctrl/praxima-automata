@@ -4,7 +4,9 @@ Public interface for other modules and entrypoints.
 """
 
 from praxima.modules.tenancy.application.selectors import (
+    PackVersionView,
     WorkspaceView,
+    available_packs,
     get_workspace,
     installed_pack,
     organization_exists,
@@ -20,6 +22,8 @@ from praxima.modules.tenancy.application.services import (
 )
 
 __all__ = [
+    "PackVersionView",
+    "available_packs",
     "WorkspaceChanges",
     "WorkspaceDraft",
     "WorkspaceView",

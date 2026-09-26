@@ -96,3 +96,29 @@ async def installed_pack(session: AsyncSession, workspace_id: uuid.UUID) -> Pack
     if payload is None:
         raise NotFound("Workspace not found.")
     return Pack.from_payload(payload)
+
+
+@dataclass(frozen=True)
+class PackVersionView:
+    key: str
+    version: str
+    name: str
+    industry: str
+
+
+async def available_packs(session: AsyncSession) -> list[PackVersionView]:
+    """Pack versions that new workspaces may use (platform table, no tenant)."""
+    rows = await session.scalars(
+        select(PackVersion)
+        .where(PackVersion.status == "available")
+        .order_by(PackVersion.pack_key, PackVersion.version)
+    )
+    return [
+        PackVersionView(
+            p.pack_key,
+            p.version,
+            p.manifest.get("name", p.pack_key),
+            p.manifest.get("industry", ""),
+        )
+        for p in rows
+    ]

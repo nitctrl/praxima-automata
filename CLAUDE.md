@@ -450,13 +450,20 @@ POST-for-everything) migrate to this. Change the backend and
 | --- | --- | --- |
 | POST / GET / DELETE | `/auth/session` | ✅ sign in (cookie `praxima_session`) / current user + CSRF + memberships / sign out |
 | GET | `/workspaces` | ✅ every workspace the signed-in user belongs to |
+| GET | `/packs` | ✅ pack versions available to new workspaces |
+| POST | `/organizations/{orgId}/workspaces` | ✅ create a workspace and install its pack (admin+) |
 | GET | `/organizations/{orgId}/workspaces` | |
 | GET, PATCH | `/workspaces/{wsId}` | ✅ read (viewer+) / partial update with `row_version` (manager+) |
 | GET | `/workspaces/{wsId}/overview` | today's summary (was `/today`) |
-| GET, POST / GET, PATCH | `/workspaces/{wsId}/agents[/{agentId}]` | persona, messages, voice config |
-| GET | `/workspaces/{wsId}/entity-types` | installed from the pack, plus custom types |
+| GET, POST / GET, PATCH | `/workspaces/{wsId}/agents[/{agentId}]` | ✅ persona, messages, status |
+| PUT | `/workspaces/{wsId}/agents/{agentId}/tools/{toolKey}` | ✅ enable/disable a pack tool |
+| POST / DELETE | `/workspaces/{wsId}/agents/{agentId}/phone-numbers[/{id}]` | ✅ route / release a number (admin+) |
+| GET | `/workspaces/{wsId}/entity-types` | ✅ installed from the pack, plus custom types |
 | GET | `/workspaces/{wsId}/work-item-kinds` | installed from the pack: payload schema and stages |
-| GET, POST / GET, PATCH, DELETE | `/workspaces/{wsId}/entities[/{id}]` | `?type=doctor&q=…`; attributes validated by type schema |
+| GET, POST / GET, PATCH, DELETE | `/workspaces/{wsId}/entities[/{id}]` | ✅ `?type=&status=&q=`; attributes validated by type schema; PATCH also sets `publication_status`; DELETE needs `?row_version=` |
+| GET | `/workspaces/{wsId}/entities/{id}/relations`, `…/availability` | ✅ links (both directions) and hours |
+| POST / PATCH / DELETE | `/workspaces/{wsId}/relations[/{id}]` | ✅ pack-checked links; PATCH sets `publication_status` |
+| POST / PATCH | `/workspaces/{wsId}/availability-rules`, `/availability-exceptions` | ✅ weekly hours (RRULE) and dated exceptions |
 | GET, POST / GET, PATCH | `/workspaces/{wsId}/announcements[/{id}]` | live updates |
 | GET, POST / GET, PATCH, DELETE | `/workspaces/{wsId}/faqs[/{id}]` | approved question/answer pairs |
 | GET, POST / GET, PATCH | `/workspaces/{wsId}/documents[/{id}]` | upload is octet-stream; `status` is PATCHable |
@@ -470,7 +477,7 @@ POST-for-everything) migrate to this. Change the backend and
 | PUT, DELETE | `/workspaces/{wsId}/memberships/{userId}`, `/organizations/{orgId}/memberships/{userId}` | ✅ grant / revoke a role (admin+; never above your own role) |
 | GET | `/health` (liveness), `/ready` (DB + critical deps) | unauthenticated, no data |
 
-✅ = implemented (step 1b). Protected endpoints take `CurrentUser`, `UserSession` or
+✅ = implemented (steps 1b and 2b). Protected endpoints take `CurrentUser`, `UserSession` or
 `WorkspaceAccess` / `OrganizationAccess` from `entrypoints/http/deps.py`. These resolve the
 caller's role (404 when they have none, so tenants aren't revealed), scope RLS, and commit
 before responding.

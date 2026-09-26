@@ -27,12 +27,12 @@ _TIMEZONES = frozenset(available_timezones())
 class WorkspaceDraft:
     slug: str
     name: str
-    industry: str
     pack_key: str
     pack_version: str
     timezone: str
     default_language: str
     supported_languages: tuple[str, ...]
+    industry: str = ""  # defaults to the pack's industry
 
 
 @dataclass(frozen=True)
@@ -91,18 +91,20 @@ async def create_workspace(
     require(actor, "workspace:create")
     _check_timezone(draft.timezone)
     _check_languages(draft.default_language, draft.supported_languages)
-    pack = await session.scalar(
-        select(PackVersion.status).where(
-            PackVersion.pack_key == draft.pack_key, PackVersion.version == draft.pack_version
+    pack = (
+        await session.execute(
+            select(PackVersion.status, PackVersion.manifest).where(
+                PackVersion.pack_key == draft.pack_key, PackVersion.version == draft.pack_version
+            )
         )
-    )
-    if pack != "available":
+    ).one_or_none()
+    if pack is None or pack.status != "available":
         raise ValidationFailed(errors=[FieldError("pack_version", "Pack version unavailable.")])
     workspace = Workspace(
         organization_id=organization_id,
         slug=draft.slug,
         name=draft.name,
-        industry=draft.industry,
+        industry=draft.industry or str(pack.manifest.get("industry", "")),
         pack_key=draft.pack_key,
         pack_version=draft.pack_version,
         timezone=draft.timezone,

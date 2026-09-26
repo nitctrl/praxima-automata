@@ -144,3 +144,19 @@ async def organization_access(
 
 WorkspaceAccess = Annotated[Access, Depends(workspace_access, scope="function")]
 OrganizationAccess = Annotated[Access, Depends(organization_access, scope="function")]
+
+
+async def narrow_to_workspace(access: Access, workspace_id: uuid.UUID) -> Access:
+    """Scope an organization-level unit of work to one of its workspaces (e.g. just created).
+
+    The caller's organization role carries over: owners and admins act on every workspace.
+    """
+    await apply_scope(
+        access.session,
+        Scope(
+            user_id=access.actor.user_id,
+            organization_id=access.organization_id,
+            workspace_id=workspace_id,
+        ),
+    )
+    return Access(access.session, access.actor, access.organization_id, workspace_id)

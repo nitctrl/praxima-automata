@@ -1,11 +1,16 @@
 """Workspace endpoints. No business logic or queries here."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response, status
 
-from praxima.entrypoints.http.deps import UserSession, WorkspaceAccess
+from praxima.entrypoints.http.deps import (
+    OrganizationAccess,
+    UserSession,
+    WorkspaceAccess,
+    narrow_to_workspace,
+)
 from praxima.entrypoints.http.responses import Page, PageInfo
-from praxima.modules import iam, tenancy
-from praxima.modules.tenancy.api.schemas import WorkspaceOut, WorkspacePatch
+from praxima.modules import catalog, iam, tenancy
+from praxima.modules.tenancy.api.schemas import PackOut, WorkspaceIn, WorkspaceOut, WorkspacePatch
 
 router = APIRouter(tags=["workspaces"])
 
@@ -35,3 +40,24 @@ async def update_workspace(body: WorkspacePatch, access: WorkspaceAccess) -> Wor
         changes=body.changes(),
     )
     return WorkspaceOut.of(await tenancy.get_workspace(access.session, access.workspace_id))
+
+
+@router.get("/packs")
+async def list_packs(session: UserSession) -> Page[PackOut]:
+    """Domain pack versions a new workspace can use."""
+    packs = [PackOut(**p.__dict__) for p in await tenancy.available_packs(session)]
+    return Page(data=packs, page=PageInfo(limit=len(packs), next_cursor=None))
+
+
+@router.post("/organizations/{organization_id}/workspaces", status_code=status.HTTP_201_CREATED)
+async def create_workspace(
+    body: WorkspaceIn, access: OrganizationAccess, response: Response
+) -> WorkspaceOut:
+    """Create a workspace and install its domain pack, in one transaction."""
+    workspace_id = await tenancy.create_workspace(
+        access.session, access.actor, organization_id=access.organization_id, draft=body.draft()
+    )
+    scoped = await narrow_to_workspace(access, workspace_id)
+    await catalog.install_pack(scoped.session, scoped.actor, workspace_id)
+    response.headers["Location"] = f"/api/v1/workspaces/{workspace_id}"
+    return WorkspaceOut.of(await tenancy.get_workspace(scoped.session, workspace_id))

@@ -187,11 +187,17 @@ async def assign_phone_number(
 
 
 async def release_phone_number(
-    session: AsyncSession, actor: Actor, *, phone_number_id: uuid.UUID
+    session: AsyncSession,
+    actor: Actor,
+    *,
+    phone_number_id: uuid.UUID,
+    agent_id: uuid.UUID | None = None,
 ) -> None:
+    """Stop routing a number. With `agent_id`, the number must belong to that agent."""
     require(actor, "phone_numbers:manage")
     number = await session.get(PhoneNumber, phone_number_id)
-    if number is None or number.status == "released":
+    wrong_agent = agent_id is not None and number is not None and number.agent_id != agent_id
+    if number is None or number.status == "released" or wrong_agent:
         raise NotFound("Phone number not found.")
     number.status = "released"
     with translate_db_errors():

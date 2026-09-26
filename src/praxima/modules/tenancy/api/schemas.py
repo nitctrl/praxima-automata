@@ -54,3 +54,28 @@ class WorkspacePatch(BaseModel):
             if self.supported_languages is not None
             else None,
         )
+
+
+class WorkspaceIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    slug: str = Field(min_length=2, max_length=63, pattern=r"^[a-z0-9][a-z0-9-]{1,62}$")
+    name: str = Field(min_length=1, max_length=200)
+    pack_key: str = Field(min_length=2, max_length=63)
+    pack_version: str = Field(min_length=5, max_length=20)
+    timezone: str = Field(min_length=1, max_length=64)
+    default_language: LanguageCode
+    supported_languages: list[LanguageCode] = Field(min_length=1, max_length=20)
+    industry: str = Field(default="", max_length=100)
+
+    def draft(self) -> tenancy.WorkspaceDraft:
+        values = self.model_dump()
+        values["supported_languages"] = tuple(values["supported_languages"])
+        return tenancy.WorkspaceDraft(**values)
+
+
+class PackOut(BaseModel):
+    key: str
+    version: str
+    name: str
+    industry: str

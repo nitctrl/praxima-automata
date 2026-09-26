@@ -190,8 +190,18 @@ async def update_entity(
     entity_id: uuid.UUID,
     row_version: int,
     changes: EntityChanges,
+    status: str | None = None,
 ) -> None:
-    require(actor, "catalog:write")
+    """Change content and/or publication status under one row_version check (one PATCH)."""
+    content = any(v is not None for v in (changes.name, changes.aliases, changes.attributes))
+    if content:
+        require(actor, "catalog:write")
+    if status is not None:
+        require(actor, "catalog:publish")
+        if status not in PUBLICATION_STATES:
+            raise ValidationFailed(errors=[FieldError("publication_status", "Unknown status.")])
+    if not content and status is None:
+        raise ValidationFailed("Nothing to change.")
     entity = await _live_entity(session, entity_id, row_version)
     changed: list[str] = []
     if changes.attributes is not None:
@@ -203,6 +213,8 @@ async def update_entity(
         entity.name, changed = changes.name, [*changed, "name"]
     if changes.aliases is not None:
         entity.aliases, changed = list(changes.aliases), [*changed, "aliases"]
+    if status is not None:
+        entity.publication_status, changed = status, [*changed, "publication_status"]
     entity.updated_by = actor.user_id
     with translate_db_errors():
         await session.flush()
@@ -213,14 +225,14 @@ async def set_entity_status(
     session: AsyncSession, actor: Actor, *, entity_id: uuid.UUID, row_version: int, status: str
 ) -> None:
     """Publish (visible in the next release), archive, or return to draft."""
-    require(actor, "catalog:publish")
-    if status not in PUBLICATION_STATES:
-        raise ValidationFailed(errors=[FieldError("publication_status", "Unknown status.")])
-    entity = await _live_entity(session, entity_id, row_version)
-    entity.publication_status, entity.updated_by = status, actor.user_id
-    with translate_db_errors():
-        await session.flush()
-    await _audit(session, actor, entity.workspace_id, f"entity.{status}", "entity", entity.id)
+    await update_entity(
+        session,
+        actor,
+        entity_id=entity_id,
+        row_version=row_version,
+        changes=EntityChanges(),
+        status=status,
+    )
 
 
 async def delete_entity(
