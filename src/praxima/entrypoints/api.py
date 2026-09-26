@@ -37,6 +37,7 @@ from praxima.entrypoints.http.setup import install
 from praxima.entrypoints.http.v1 import build_router
 from praxima.integrations.llm.gemini import GroundedAnswerer
 from praxima.integrations.vectors.qdrant import VectorSearch
+from praxima.modules.engagement import Vault
 from praxima.modules.knowledge import KnowledgeIndex
 from praxima.modules.knowledge.application.retrieval import (
     HybridRetriever,
@@ -179,10 +180,12 @@ def create_app(
     answerer: GroundedAnswerer | None = None,
     api_sessions: SessionMaker | None = None,
     knowledge_index: KnowledgeIndex | None = None,
+    vault: Vault | None = None,
 ) -> FastAPI:
     """The staff API: legacy /api routes plus the new /api/v1 REST API.
 
     `api_sessions` connects /api/v1 to the new schema; without it v1 answers 503.
+    `vault` holds the CRM personal-data keys; without it those endpoints answer 503.
     """
     config = settings or WebSettings.from_environment()
     backend = gateway or SupabaseGateway(config)
@@ -210,6 +213,7 @@ def create_app(
     app.state.login_limiter = RateLimiter(per_minute=10)
     app.state.cookie_secure = config.origin.startswith("https:")
     app.state.knowledge_index = knowledge_index  # Qdrant; None → keyword search only
+    app.state.vault = vault
     app.include_router(build_router(), prefix="/api/v1")
 
     def rate(key: str, maximum: int) -> None:

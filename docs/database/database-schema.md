@@ -1437,7 +1437,8 @@ Built and tested against a real PostgreSQL 16 (`tests/test_knowledge_db.py`).
 ## 19. Implemented (revision 0005: engagement)
 
 Built and tested against a real PostgreSQL 16 (`tests/test_engagement_db.py`,
-`tests/test_engagement_pure.py`). The API (step 5b) is not built yet.
+`tests/test_engagement_pure.py`). The API is step 5b (`tests/test_api_v1_engagement_db.py`;
+endpoints in `CLAUDE.md` §6). Creating a workspace now installs its work item kinds too.
 
 - **Tables:**
   - `contacts`, `consents`, `conversations`, `call_events`, `work_item_kinds`, `work_items`,

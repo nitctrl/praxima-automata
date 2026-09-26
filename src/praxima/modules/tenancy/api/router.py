@@ -9,7 +9,7 @@ from praxima.entrypoints.http.deps import (
     narrow_to_workspace,
 )
 from praxima.entrypoints.http.responses import Page, PageInfo
-from praxima.modules import catalog, iam, tenancy
+from praxima.modules import catalog, engagement, iam, tenancy
 from praxima.modules.tenancy.api.schemas import PackOut, WorkspaceIn, WorkspaceOut, WorkspacePatch
 
 router = APIRouter(tags=["workspaces"])
@@ -53,11 +53,12 @@ async def list_packs(session: UserSession) -> Page[PackOut]:
 async def create_workspace(
     body: WorkspaceIn, access: OrganizationAccess, response: Response
 ) -> WorkspaceOut:
-    """Create a workspace and install its domain pack, in one transaction."""
+    """Create a workspace and install its domain pack (entity types, work item kinds)."""
     workspace_id = await tenancy.create_workspace(
         access.session, access.actor, organization_id=access.organization_id, draft=body.draft()
     )
     scoped = await narrow_to_workspace(access, workspace_id)
     await catalog.install_pack(scoped.session, scoped.actor, workspace_id)
+    await engagement.install_work_item_kinds(scoped.session, scoped.actor, workspace_id)
     response.headers["Location"] = f"/api/v1/workspaces/{workspace_id}"
     return WorkspaceOut.of(await tenancy.get_workspace(scoped.session, workspace_id))

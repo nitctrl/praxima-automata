@@ -12,8 +12,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from praxima.modules import audit, iam, tenancy
-from praxima.modules.catalog.infrastructure.models import Entity, EntityType
+from praxima.modules import audit, catalog, iam, tenancy
 from praxima.modules.engagement.application.vault import Vault
 from praxima.modules.engagement.domain.work_items import check_transition
 from praxima.modules.engagement.infrastructure.models import (
@@ -256,12 +255,11 @@ async def _current_kind(session: AsyncSession, key: str) -> WorkItemKind:
 
 
 async def _check_subject(session: AsyncSession, kind: WorkItemKind, entity_id: uuid.UUID) -> None:
-    type_key = await session.scalar(
-        select(EntityType.key)
-        .join(Entity, Entity.entity_type_id == EntityType.id)
-        .where(Entity.id == entity_id, Entity.deleted_at.is_(None))
-    )
-    if type_key is None or type_key not in kind.subject_types:
+    try:
+        type_key: str | None = (await catalog.get_entity(session, entity_id)).type
+    except NotFound:
+        type_key = None
+    if type_key not in kind.subject_types:
         allowed = ", ".join(kind.subject_types) or "nothing"
         raise ValidationFailed(errors=[FieldError("entity_id", f"Must be one of: {allowed}.")])
 
@@ -382,6 +380,14 @@ async def move_work_item(
     )
 
 
+async def _check_member(session: AsyncSession, workspace_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    organization_id = await tenancy.organization_of(session, workspace_id)
+    if await iam.role_in(session, user_id, organization_id, workspace_id) is None:
+        raise ValidationFailed(
+            errors=[FieldError("assignee_user_id", "Not a member of this workspace.")]
+        )
+
+
 async def assign_work_item(
     session: AsyncSession,
     actor: Actor,
@@ -394,11 +400,7 @@ async def assign_work_item(
     require(actor, "crm:assign")
     item = await _work_item(session, work_item_id, row_version)
     if assignee_user_id is not None:
-        organization_id = await tenancy.organization_of(session, item.workspace_id)
-        if await iam.role_in(session, assignee_user_id, organization_id, item.workspace_id) is None:
-            raise ValidationFailed(
-                errors=[FieldError("assignee_user_id", "Not a member of this workspace.")]
-            )
+        await _check_member(session, item.workspace_id, assignee_user_id)
     item.assignee_user_id, item.updated_by = assignee_user_id, actor.user_id
     with translate_db_errors():
         await session.flush()
@@ -504,6 +506,8 @@ async def create_task(
     due_at: datetime | None = None,
 ) -> uuid.UUID:
     require(actor, "crm:write")
+    if assignee_user_id is not None:
+        await _check_member(session, workspace_id, assignee_user_id)
     task = Task(
         workspace_id=workspace_id,
         title=title,

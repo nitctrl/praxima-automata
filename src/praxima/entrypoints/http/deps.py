@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from praxima.entrypoints.http.identity import IdentityGateway
 from praxima.entrypoints.http.sessions import COOKIE_NAME, RateLimiter, SessionStore, WebSession
 from praxima.modules import iam, tenancy
+from praxima.modules.engagement import Vault
 from praxima.modules.knowledge import KnowledgeIndex
 from praxima.shared.db.engine import Scope, apply_scope, scoped_transaction
 from praxima.shared.db.pagination import DEFAULT_LIMIT, MAX_LIMIT, PageRequest
@@ -169,3 +170,11 @@ def knowledge_index(request: Request) -> KnowledgeIndex | None:
 
 
 Index = Annotated[KnowledgeIndex | None, Depends(knowledge_index)]
+
+
+def pii_vault(request: Request) -> Vault:
+    """Encryption and phone lookup keys for CRM personal data; 503 when not configured."""
+    return _state(request, "vault")  # type: ignore[return-value]
+
+
+PiiVault = Annotated[Vault, Depends(pii_vault)]

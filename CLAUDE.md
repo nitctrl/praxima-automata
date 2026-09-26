@@ -465,7 +465,7 @@ POST-for-everything) migrate to this. Change the backend and
 | PUT | `/workspaces/{wsId}/agents/{agentId}/tools/{toolKey}` | ✅ enable/disable a pack tool |
 | POST / DELETE | `/workspaces/{wsId}/agents/{agentId}/phone-numbers[/{id}]` | ✅ route / release a number (admin+) |
 | GET | `/workspaces/{wsId}/entity-types` | ✅ installed from the pack, plus custom types |
-| GET | `/workspaces/{wsId}/work-item-kinds` | installed from the pack: payload schema and stages |
+| GET | `/workspaces/{wsId}/work-item-kinds` | ✅ installed from the pack: payload schema, stages, subject types |
 | GET, POST / GET, PATCH, DELETE | `/workspaces/{wsId}/entities[/{id}]` | ✅ `?type=&status=&q=`; attributes validated by type schema; PATCH also sets `publication_status`; DELETE needs `?row_version=` |
 | GET | `/workspaces/{wsId}/entities/{id}/relations`, `…/availability` | ✅ links (both directions) and hours |
 | POST / PATCH / DELETE | `/workspaces/{wsId}/relations[/{id}]` | ✅ pack-checked links; PATCH sets `publication_status` |
@@ -478,15 +478,22 @@ POST-for-everything) migrate to this. Change the backend and
 | GET | `/workspaces/{wsId}/knowledge/search?q=` | ✅ keyword + Qdrant (when configured) search of published documents |
 | POST | `/workspaces/{wsId}/agents/{agentId}/releases/preview` | snapshot + digest |
 | GET, POST | `/workspaces/{wsId}/agents/{agentId}/releases` | list / publish previewed digest; rollback = publish `{source}` |
-| GET / GET, PATCH | `/workspaces/{wsId}/work-items[/{id}]` | `?kind=&stage=`; PATCH `{stage}` |
-| POST | `/workspaces/{wsId}/work-items/{id}/contact-reveal` | audited; stays POST |
-| GET / GET | `/workspaces/{wsId}/conversations[/{id}]` | sanitized outcomes only |
+| GET, POST / GET, PATCH | `/workspaces/{wsId}/work-items[/{id}]` | ✅ `?kind=&stage=&open=&assignee_user_id=&entity_id=`; POST takes `Idempotency-Key`; PATCH is either `{stage}` or payload / staff note / due time, with `row_version`; no personal data in responses |
+| PUT | `/workspaces/{wsId}/work-items/{id}/assignee` | ✅ assign to a workspace member or `null` (manager+) |
+| POST / DELETE | `/workspaces/{wsId}/work-items/{id}/reveal`, `…/personal-details` | ✅ decrypt (staff+, audited; stays POST) / erase (admin+) |
+| GET, POST / GET | `/workspaces/{wsId}/contacts[/{id}]` | ✅ encrypted name and phone; duplicate phone → 409 |
+| POST | `/workspaces/{wsId}/contacts/search` | ✅ exact phone match via the lookup digest; POST so the number never appears in a URL |
+| POST | `/workspaces/{wsId}/contacts/{id}/consents`, `…/reveal`; DELETE `…/personal-details` | ✅ append a consent / decrypt (audited) / erase |
+| GET / GET | `/workspaces/{wsId}/conversations[/{id}]` | ✅ `?needs_review=&include_tests=`; sanitized outcome + call timeline only |
+| GET, POST / GET, PATCH | `/workspaces/{wsId}/tasks[/{id}]` | ✅ `?status=&assignee_user_id=&work_item_id=`; PATCH `{row_version, status}` |
 | POST | `/workspaces/{wsId}/agents/{agentId}/test-queries` | same retrieval path as calls; `is_test` |
 | GET | `/workspaces/{wsId}/members`, `/organizations/{orgId}/members` | ✅ paged member list (manager+) |
 | PUT, DELETE | `/workspaces/{wsId}/memberships/{userId}`, `/organizations/{orgId}/memberships/{userId}` | ✅ grant / revoke a role (admin+; never above your own role) |
 | GET | `/health` (liveness), `/ready` (DB + critical deps) | unauthenticated, no data |
 
-✅ = implemented (steps 1b, 2b and 3b). Protected endpoints take `CurrentUser`, `UserSession` or
+✅ = implemented (steps 1b, 2b, 3b and 5b). CRM endpoints that touch personal data need
+the `Vault` (`CLINIC_PII_KEYS`, `CLINIC_PII_KEY_VERSION`, `PRAXIMA_LOOKUP_KEY`) and answer
+503 without it. Protected endpoints take `CurrentUser`, `UserSession` or
 `WorkspaceAccess` / `OrganizationAccess` from `entrypoints/http/deps.py`. These resolve the
 caller's role (404 when they have none, so tenants aren't revealed), scope RLS, and commit
 before responding.
