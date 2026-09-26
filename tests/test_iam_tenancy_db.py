@@ -32,7 +32,10 @@ URL = os.environ.get("PRAXIMA_TEST_DATABASE_URL", "")
 pytestmark = pytest.mark.skipif(not URL, reason="Set PRAXIMA_TEST_DATABASE_URL to run.")
 ROOT = Path(__file__).resolve().parents[1]
 TABLES = (
-    "audit.audit_log, knowledge.chunks, knowledge.document_sections, knowledge.faqs, "
+    "audit.audit_log, engagement.call_events, engagement.work_item_events, "
+    "engagement.consents, engagement.tasks, engagement.work_items, "
+    "engagement.work_item_kinds, engagement.conversations, engagement.contacts, "
+    "knowledge.chunks, knowledge.document_sections, knowledge.faqs, "
     "knowledge.announcements, knowledge.document_versions, knowledge.documents, "
     "knowledge.sources, catalog.availability_exceptions, catalog.availability_rules, "
     "catalog.entity_relations, catalog.entities, catalog.entity_types, agents.agent_tools, "

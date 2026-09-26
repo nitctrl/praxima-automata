@@ -1433,3 +1433,50 @@ Built and tested against a real PostgreSQL 16 (`tests/test_knowledge_db.py`).
   and on create).
 - **Announcements** store `valid_during` as a non-empty `[start, end)` range. The
   `active_at` filter uses range containment.
+
+## 19. Implemented (revision 0005: engagement)
+
+Built and tested against a real PostgreSQL 16 (`tests/test_engagement_db.py`,
+`tests/test_engagement_pure.py`). The API (step 5b) is not built yet.
+
+- **Tables:**
+  - `contacts`, `consents`, `conversations`, `call_events`, `work_item_kinds`, `work_items`,
+    `work_item_events` and `tasks`, all with forced RLS on `app.workspace_id` and composite
+    tenant FKs.
+  - `conversations` is not partitioned. Its `agent_release_id` has no FK yet; that FK is
+    added with `releases` (step 4).
+- **Append-only tables:** `consents`, `work_item_events` and `call_events` get SELECT and
+  INSERT policies only, plus a `<table>_append_only` trigger (`ops.reject_mutation()`).
+  Under RLS, UPDATE and DELETE affect 0 rows; as owner, they raise.
+- **`call_events` partitions:**
+  - Partitioned monthly, `PRIMARY KEY (id, occurred_at)`.
+  - `engagement.ensure_partitions(months_ahead)` creates the partitions, and
+    `call_events_default` catches the rest.
+- **Work item kinds:**
+  - Kinds come from the pack (`packs/<key>/work_items/*.json`: payload schema, stages,
+    initial and terminal stages, subject entity types).
+  - `install_work_item_kinds` copies them into the workspace, and it is idempotent.
+  - Payloads are validated against the kind's JSON Schema. The clinic kinds have no
+    free-text fields.
+  - Stage moves follow `domain/work_items.check_transition`: the stage must be declared, the
+    item can't already be in that stage, and terminal items are closed.
+  - Every move writes a `work_item_events` row.
+- **Idempotency and concurrency:**
+  - `(workspace_id, idempotency_key)` is unique on `work_items`, so a retried call returns
+    the existing item.
+  - `work_items` and `tasks` use `row_version` (SQLAlchemy `version_id_col`); a stale
+    version gives 409.
+- **PII handling:**
+  - Names, phones and staff notes are stored only as AES-GCM `*_ciphertext`, bound to
+    workspace, record and field.
+  - Contacts also have `phone_lookup_hmac`: HMAC-SHA256 of `phone-v1:<workspace>:<E.164>`,
+    keyed by `PRAXIMA_LOOKUP_KEY`, unique per workspace. The same phone gives unrelated
+    digests in different workspaces.
+  - Lists and details only say whether personal details exist or were erased.
+    `reveal_contact` / `reveal_work_item` need `pii:reveal` (staff+) and write a `pii.reveal`
+    audit row.
+  - Erasure (`pii:erase`, admin+) nulls the ciphertexts and keeps the row and its history.
+- **Deviation:** `pii_key_version` is `text`, not `integer`. It stores the version label
+  of the `PiiCipher` keyring (`CLINIC_PII_KEYS`), which is a string today.
+- **New permissions:** `crm:read` (viewer), `crm:write` (staff), `crm:assign` (manager),
+  `pii:reveal` (staff), `pii:erase` (admin). Assignees must hold a role in the workspace.

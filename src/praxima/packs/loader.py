@@ -79,6 +79,32 @@ class RelationTypeSpec(Strict):
         return self
 
 
+class WorkItemKindSpec(Strict):
+    """A kind of request or lead staff follow up (appointment request, site visit ...)."""
+
+    key: str = Field(pattern=KEY)
+    name: str = Field(min_length=1, max_length=100)
+    schema_version: int = Field(ge=1)
+    payload_schema: dict[str, Any]
+    stages: tuple[str, ...] = Field(min_length=2)
+    initial_stage: str
+    terminal_stages: tuple[str, ...] = Field(min_length=1)
+    subject_types: tuple[str, ...] = ()  # entity types a work item may be about
+
+    @model_validator(mode="after")
+    def _valid(self) -> "WorkItemKindSpec":
+        _check_schema(self.payload_schema, f"work item kind {self.key}")
+        if len(set(self.stages)) != len(self.stages) or any(
+            not KEY_RE.fullmatch(stage) for stage in self.stages
+        ):
+            raise PackError(f"work item kind {self.key}: invalid or duplicate stages")
+        if self.initial_stage not in self.stages or self.initial_stage in self.terminal_stages:
+            raise PackError(f"work item kind {self.key}: initial stage must be a live stage")
+        if set(self.terminal_stages) - set(self.stages):
+            raise PackError(f"work item kind {self.key}: unknown terminal stage")
+        return self
+
+
 class Pack(Strict):
     key: str = Field(pattern=KEY)
     version: str = Field(pattern=SEMVER)
@@ -91,6 +117,7 @@ class Pack(Strict):
     tools: tuple[str, ...] = ()
     document_categories: tuple[str, ...] = ()
     announcement_kinds: tuple[str, ...] = ()
+    work_item_kinds: tuple[WorkItemKindSpec, ...] = ()
 
     @model_validator(mode="after")
     def _consistent(self) -> "Pack":
@@ -107,6 +134,12 @@ class Pack(Strict):
             raise PackError(f"pack {self.key}: availability for an unknown entity type")
         if unknown := set(self.tools) - GENERIC_TOOLS:
             raise PackError(f"pack {self.key}: unknown tools {sorted(unknown)}")
+        kinds = [k.key for k in self.work_item_kinds]
+        if len(set(kinds)) != len(kinds):
+            raise PackError(f"pack {self.key}: duplicate work item kinds")
+        for kind in self.work_item_kinds:
+            if set(kind.subject_types) - set(types):
+                raise PackError(f"work item kind {kind.key}: unknown subject type")
         for name, keys in (
             ("document categories", self.document_categories),
             ("announcement kinds", self.announcement_kinds),
@@ -120,6 +153,9 @@ class Pack(Strict):
 
     def relation_type(self, key: str) -> RelationTypeSpec | None:
         return next((r for r in self.relation_types if r.key == key), None)
+
+    def work_item_kind(self, key: str) -> WorkItemKindSpec | None:
+        return next((k for k in self.work_item_kinds if k.key == key), None)
 
     def payload(self) -> dict[str, Any]:
         """The full pack as stored in tenancy.pack_versions.manifest."""
@@ -159,6 +195,10 @@ def load(key: str, root: Path = PACKS_DIR) -> Pack:
         names = manifest.get("entity_types", [])
         manifest["entity_types"] = [
             json.loads((folder / "entity_types" / f"{name}.json").read_text()) for name in names
+        ]
+        kinds = manifest.get("work_item_kinds", [])
+        manifest["work_item_kinds"] = [
+            json.loads((folder / "work_items" / f"{name}.json").read_text()) for name in kinds
         ]
         return _validated(manifest, key)
     except (OSError, yaml.YAMLError, json.JSONDecodeError) as exc:

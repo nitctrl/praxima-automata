@@ -26,6 +26,11 @@ PERMISSIONS = {
     "knowledge:read": "viewer",
     "knowledge:write": "manager",
     "knowledge:publish": "manager",
+    "crm:read": "viewer",
+    "crm:write": "staff",
+    "crm:assign": "manager",
+    "pii:reveal": "staff",
+    "pii:erase": "admin",
 }
 
 

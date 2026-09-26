@@ -36,6 +36,9 @@ document_categories:
 # Kinds of live updates (announcements) staff can post.
 announcement_kinds: [information, closure, no_walk_ins, doctor_unavailable, service_unavailable]
 
+# Requests staff follow up (files in work_items/). Never confirmed bookings.
+work_item_kinds: [appointment_request, callback_request]
+
 # Generic voice tools this pack enables by default (keys from the runtime tool registry).
 tools:
   - find_entities
