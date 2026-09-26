@@ -5,6 +5,7 @@ postgresql+psycopg://<user>@/praxima_test?host=/var/run/postgresql
 """
 
 import asyncio
+import json
 import os
 import uuid
 from collections.abc import Awaitable, Callable
@@ -19,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from support.queries import count_queries
 
 from praxima.modules import iam, tenancy
+from praxima.packs import loader as packs
 from praxima.shared.db.base import Base
 from praxima.shared.db.engine import Scope, create_engine, scoped_transaction, session_factory
 from praxima.shared.db.pagination import PageRequest
@@ -30,9 +32,13 @@ URL = os.environ.get("PRAXIMA_TEST_DATABASE_URL", "")
 pytestmark = pytest.mark.skipif(not URL, reason="Set PRAXIMA_TEST_DATABASE_URL to run.")
 ROOT = Path(__file__).resolve().parents[1]
 TABLES = (
-    "audit.audit_log, iam.api_keys, iam.memberships, iam.identities, iam.platform_admins, "
-    "iam.users, tenancy.workspaces, tenancy.organizations, tenancy.pack_versions"
+    "audit.audit_log, catalog.availability_exceptions, catalog.availability_rules, "
+    "catalog.entity_relations, catalog.entities, catalog.entity_types, agents.agent_tools, "
+    "agents.phone_numbers, agents.agents, iam.api_keys, iam.memberships, iam.identities, "
+    "iam.platform_admins, iam.users, tenancy.workspaces, tenancy.organizations, "
+    "tenancy.pack_versions"
 )
+CLINIC = packs.load("clinic")
 DRAFT = tenancy.WorkspaceDraft(
     slug="main",
     name="Main clinic",
@@ -63,8 +69,14 @@ def admin_id(migrated: None) -> uuid.UUID:
         connection.execute(
             text(
                 "INSERT INTO tenancy.pack_versions (pack_key, version, manifest, checksum) "
-                "VALUES ('clinic', '1.0.0', '{}', 'test')"
-            )
+                "VALUES (:key, :version, CAST(:manifest AS jsonb), :checksum)"
+            ),
+            {
+                "key": CLINIC.key,
+                "version": CLINIC.version,
+                "manifest": json.dumps(CLINIC.payload()),
+                "checksum": CLINIC.checksum(),
+            },
         )
         connection.execute(
             text("INSERT INTO iam.users (id, email) VALUES (:id, 'admin@platform.test')"),

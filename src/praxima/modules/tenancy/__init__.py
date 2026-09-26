@@ -6,6 +6,7 @@ Public interface for other modules and entrypoints.
 from praxima.modules.tenancy.application.selectors import (
     WorkspaceView,
     get_workspace,
+    installed_pack,
     organization_exists,
     organization_of,
     visible_workspaces,
@@ -25,6 +26,7 @@ __all__ = [
     "create_organization",
     "create_workspace",
     "get_workspace",
+    "installed_pack",
     "organization_exists",
     "organization_of",
     "update_workspace",

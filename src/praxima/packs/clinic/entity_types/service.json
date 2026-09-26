@@ -1,0 +1,20 @@
+{
+  "key": "service",
+  "name": "Service",
+  "description": "A consultation, test or procedure the clinic offers.",
+  "schema_version": 1,
+  "searchable_fields": ["name", "category"],
+  "display_template": {"title": "{name}", "subtitle": "{category}"},
+  "attributes_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "category": {"type": "string", "maxLength": 80},
+      "description": {"type": "string", "maxLength": 1000},
+      "duration_minutes": {"type": "integer", "minimum": 1, "maximum": 1440},
+      "fee": {"type": "number", "minimum": 0},
+      "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+      "requires_appointment": {"type": "boolean"}
+    }
+  }
+}

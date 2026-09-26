@@ -16,6 +16,13 @@ PERMISSIONS = {
     "members:manage": "admin",
     "workspace:create": "admin",
     "organization:update": "owner",
+    "packs:install": "admin",
+    "catalog:read": "viewer",
+    "catalog:write": "manager",
+    "catalog:publish": "manager",
+    "agents:read": "viewer",
+    "agents:write": "manager",
+    "phone_numbers:manage": "admin",
 }
 
 

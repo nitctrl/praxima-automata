@@ -12,6 +12,7 @@ UNIQUE_VIOLATION = "23505"
 FOREIGN_KEY_VIOLATION = "23503"
 CHECK_VIOLATION = "23514"
 NOT_NULL_VIOLATION = "23502"
+EXCLUSION_VIOLATION = "23P01"  # e.g. overlapping validity windows
 INSUFFICIENT_PRIVILEGE = "42501"  # includes "new row violates row-level security policy"
 
 
@@ -26,7 +27,7 @@ def translate_db_errors(
         raise Conflict("This item was changed by someone else. Reload and try again.") from None
     except DBAPIError as exc:
         state = getattr(exc.orig, "sqlstate", None)
-        if state == UNIQUE_VIOLATION:
+        if state in (UNIQUE_VIOLATION, EXCLUSION_VIOLATION):
             raise Conflict(duplicate) from None
         if state == FOREIGN_KEY_VIOLATION:
             raise ValidationFailed(reference) from None

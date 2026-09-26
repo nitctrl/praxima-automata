@@ -1,0 +1,20 @@
+{
+  "key": "location",
+  "name": "Location",
+  "description": "A clinic branch or consultation address.",
+  "schema_version": 1,
+  "searchable_fields": ["name", "city", "landmark"],
+  "display_template": {"title": "{name}", "subtitle": "{city}"},
+  "attributes_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["address", "city"],
+    "properties": {
+      "address": {"type": "string", "minLength": 1, "maxLength": 300},
+      "city": {"type": "string", "minLength": 1, "maxLength": 80},
+      "pincode": {"type": "string", "pattern": "^[0-9]{6}$"},
+      "landmark": {"type": "string", "maxLength": 200},
+      "map_url": {"type": "string", "maxLength": 500, "pattern": "^https://"}
+    }
+  }
+}

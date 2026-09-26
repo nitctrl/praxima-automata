@@ -39,6 +39,6 @@ class AuditEntry(Base):
     resource_type: Mapped[str] = mapped_column(Text)
     resource_id: Mapped[uuid.UUID | None]
     outcome: Mapped[str] = mapped_column(Text)
-    change_diff: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    change_diff: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
     correlation_id: Mapped[str | None] = mapped_column(Text)
     hash_chain: Mapped[str | None] = mapped_column(Text)

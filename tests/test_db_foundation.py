@@ -205,3 +205,15 @@ def test_scope_sets_only_what_is_known():
         ("app.user_id", str(user)),
     ]
     assert Scope().settings() == []
+
+
+def test_optional_json_columns_store_sql_null():
+    """SQLAlchemy writes Python None as JSON 'null' unless none_as_null; that breaks
+    'IS NULL' checks and CHECK (attributes IS NULL OR jsonb_typeof(...) = 'object')."""
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    import_models()
+    for table in Base.metadata.tables.values():
+        for column in table.columns:
+            if isinstance(column.type, JSONB) and column.nullable:
+                assert column.type.none_as_null, f"{table.fullname}.{column.name}"

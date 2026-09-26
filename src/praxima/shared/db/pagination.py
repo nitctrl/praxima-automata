@@ -62,8 +62,14 @@ def _parse(value: object, key: InstrumentedAttribute[Any]) -> Any:
 
 
 def _key_value(row: Any, key: InstrumentedAttribute[Any]) -> Any:
-    single = row[0] if len(row) == 1 and hasattr(row[0], "__mapper__") else row
-    return getattr(single, key.key)
+    """The key's value from a row of columns or of ORM entities (possibly joined)."""
+    if key.key in row._mapping:
+        return row._mapping[key.key]
+    owner = key.parent.class_  # the mapped class, also for aliased keys
+    for value in row:
+        if isinstance(value, owner):
+            return getattr(value, key.key)
+    raise KeyError(f"page key {key.key} is not selected")
 
 
 async def fetch_page(

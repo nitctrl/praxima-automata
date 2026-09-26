@@ -1,0 +1,40 @@
+# Clinic domain pack. Data only: installing it into a workspace copies these definitions.
+# Bump `version` for any change; workspaces upgrade explicitly.
+key: clinic
+version: 1.0.0
+name: Clinic
+industry: healthcare
+languages: [hi-IN, en-IN]
+
+# Files in entity_types/ (one JSON Schema per type).
+entity_types: [doctor, service, location]
+
+relation_types:
+  - key: doctor_offers_service
+    from: doctor
+    to: service
+    description: A doctor provides this service, optionally at a doctor-specific fee.
+    attributes_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        fee: {type: number, minimum: 0}
+        currency: {type: string, pattern: "^[A-Z]{3}$"}
+  - key: doctor_at_location
+    from: doctor
+    to: location
+    description: A doctor consults at this location.
+    attributes_schema: {type: object, additionalProperties: false, properties: {}}
+
+# Entity types that can have weekly hours and dated exceptions.
+availability_for: [doctor, location]
+
+# Generic voice tools this pack enables by default (keys from the runtime tool registry).
+tools:
+  - find_entities
+  - get_entity
+  - get_availability
+  - search_knowledge
+  - get_announcements
+  - create_work_item
+  - request_callback

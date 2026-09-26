@@ -37,6 +37,8 @@ class Scope:
     identity_email: str | None = None
     # Set only while authenticating a presented API key (SHA-256 hex of the key).
     api_key_hash: str | None = None
+    # Set only by trusted telephony ingress: the E.164 number the caller dialled.
+    called_number: str | None = None
 
     def settings(self) -> list[tuple[str, str]]:
         values = {
@@ -47,6 +49,7 @@ class Scope:
             "app.identity_subject": self.identity_subject,
             "app.identity_email": self.identity_email,
             "app.api_key_hash": self.api_key_hash,
+            "app.called_number": self.called_number,
         }
         return [(name, str(value)) for name, value in values.items() if value is not None]
 

@@ -1,0 +1,24 @@
+{
+  "key": "doctor",
+  "name": "Doctor",
+  "description": "A doctor who consults at the clinic.",
+  "schema_version": 1,
+  "searchable_fields": ["name", "specialization", "qualification"],
+  "display_template": {"title": "{name}", "subtitle": "{specialization}"},
+  "attributes_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["specialization"],
+    "properties": {
+      "specialization": {"type": "string", "minLength": 1, "maxLength": 120},
+      "qualification": {"type": "string", "maxLength": 200},
+      "experience_years": {"type": "integer", "minimum": 0, "maximum": 70},
+      "languages": {
+        "type": "array",
+        "maxItems": 10,
+        "items": {"type": "string", "pattern": "^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$"}
+      },
+      "registration_number": {"type": "string", "maxLength": 60}
+    }
+  }
+}

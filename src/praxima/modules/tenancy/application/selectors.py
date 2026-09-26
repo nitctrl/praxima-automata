@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from praxima.modules.tenancy.infrastructure.models import Organization, Workspace
+from praxima.modules.tenancy.infrastructure.models import Organization, PackVersion, Workspace
+from praxima.packs.loader import Pack
 from praxima.shared.errors import NotFound
 
 
@@ -79,3 +80,19 @@ async def organization_exists(session: AsyncSession, organization_id: uuid.UUID)
             )
         )
     ) is not None
+
+
+async def installed_pack(session: AsyncSession, workspace_id: uuid.UUID) -> Pack:
+    """The pack version this workspace runs, from the stored registry payload (one query)."""
+    payload = await session.scalar(
+        select(PackVersion.manifest)
+        .join(
+            Workspace,
+            (Workspace.pack_key == PackVersion.pack_key)
+            & (Workspace.pack_version == PackVersion.version),
+        )
+        .where(Workspace.id == workspace_id, Workspace.deleted_at.is_(None))
+    )
+    if payload is None:
+        raise NotFound("Workspace not found.")
+    return Pack.from_payload(payload)

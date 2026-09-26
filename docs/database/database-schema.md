@@ -1377,3 +1377,27 @@ Refinements made during implementation:
 - **Invitations:** a user row created by an organization admin is linked at first login only
   when the provider has verified that exact email. An unverified email can never take over
   an invited account.
+
+## 17. Implemented (revision 0003: agents, catalog)
+
+Built and tested against a real PostgreSQL 16 (`tests/test_agents_catalog_db.py`).
+
+- **Tenant RLS on all 8 tables**, keyed on `app.workspace_id`: SELECT, INSERT and UPDATE
+  policies only. There is no DELETE policy; rows are soft-deleted or change status.
+- **Ingress lookup:** before any tenant is known, the voice runtime may read exactly one
+  `agents.phone_numbers` row, the **active** number in `app.called_number`. Trusted telephony
+  ingress sets that setting; the caller never does. A number is active for only one agent
+  across the whole platform (partial unique index); a released number can be reused.
+- **Relations:** `ex_entity_relations_no_overlap` refuses two live relations of the same type
+  between the same entities with overlapping `valid_during`.
+- **Search:** `entities.search_vector` is not built. `array_to_string` is not `IMMUTABLE`,
+  so a generated column over aliases is impossible. Name search uses a trigram GIN index
+  (`ix_entities_name_trgm`); aliases are matched case-insensitively.
+- **Packs:** the full validated pack (manifest plus entity-type schemas) is stored in
+  `tenancy.pack_versions.manifest`, with a SHA-256 checksum. Installing a pack reads that
+  stored payload, never the files, so installs are reproducible. Relation types and
+  `availability_for` are validated against the installed pack version.
+- **Optional JSONB columns** use `none_as_null`, so Python `None` is stored as SQL `NULL`
+  rather than JSON `null`. A test enforces this for every model.
+- **Attribute validation:** jsonschema messages are replaced by value-free ones (for example
+  "has the wrong type"), because submitted values may be personal data.
