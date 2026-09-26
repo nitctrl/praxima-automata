@@ -1,7 +1,8 @@
 """ORM base and standard columns. Models live only in each module's infrastructure layer."""
 
+import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import DateTime, MetaData, func, text
@@ -52,9 +53,21 @@ class TenantMixin:
     workspace_id: Mapped[uuid.UUID]
 
 
+# Monthly partitions are named <table>_pYYYYMM plus <table>_default; autogenerate ignores them.
+PARTITION_NAME = re.compile(r".+_(p\d{6}|default)$")
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+    # Client-side defaults (plus server defaults for raw SQL) so INSERT needs no RETURNING:
+    # under RLS a freshly inserted row may not be readable back yet.
+    created_at: Mapped[datetime] = mapped_column(default=utc_now, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        default=utc_now, onupdate=utc_now, server_default=func.now()
+    )
 
 
 class AuthoringMixin(TimestampMixin):

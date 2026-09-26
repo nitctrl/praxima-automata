@@ -73,7 +73,8 @@ residency.
   so they can be targets of composite FKs.
 - **Types:** `text` with `CHECK` constraints for statuses and kinds (not `varchar(n)`);
   `text[]` for languages, aliases and scopes; `timestamptz` everywhere; validity windows as
-  `tstzrange`; money as `numeric` plus an ISO-4217 `currency`; email as `citext`.
+  `tstzrange`; money as `numeric` plus an ISO-4217 `currency`; email as lowercased `text`
+  with a `CHECK` (portable, no extension-dependent comparisons).
 - **Authoring columns** (on every staff-editable table): `created_at`, `updated_at`,
   `created_by`, `updated_by`, `deleted_at` (soft delete), `row_version integer`
   (optimistic concurrency: stale writes get HTTP 409).
@@ -170,7 +171,7 @@ Authoring columns (§4) are written out on each table that has them.
 
 Table iam.users {
   id uuid [pk]
-  email citext [not null, unique]
+  email text [not null, unique, note: 'stored lowercased; CHECK email = lower(email)']
   display_name text
   status text [not null, note: 'CHECK active | disabled']
   created_at timestamptz [not null]
@@ -1333,3 +1334,46 @@ tests/db/                       # isolation, constraints, partitions, append-onl
   remain.
 - Types: `text` plus `CHECK` instead of `varchar(n)`, `text[]` for lists, and `citext` email.
 - Audit log: added `organization_id`, `actor_type` and `outcome`.
+
+## 16. Implemented (revision 0002: iam, tenancy, audit)
+
+Built and tested against a real PostgreSQL 16 (`tests/test_iam_tenancy_db.py`).
+Refinements made during implementation:
+
+- **Scope settings.** RLS reads settings that only trusted plumbing sets per transaction
+  (`praxima.shared.db.engine.Scope`):
+  - `app.user_id`, `app.organization_id` and `app.workspace_id`;
+  - during a verified login, `app.identity_provider`, `app.identity_subject` and
+    `app.identity_email`;
+  - during API-key authentication, `app.api_key_hash`.
+
+  The helper functions `iam.current_user_id()`, `tenancy.current_organization_id()`,
+  `tenancy.current_workspace_id()` and `iam.is_platform_admin()` read them.
+- **RLS per table:**
+
+  | Table | Rule |
+  | --- | --- |
+  | `tenancy.organizations`, `tenancy.workspaces` | visible to members (or in the scoped organization); organizations are created by platform admins only |
+  | `iam.memberships` | own rows, or the scoped organization |
+  | `iam.users` | self, members of the scoped organization, or the login being resolved |
+  | `iam.identities` | own identities, or the verified login |
+  | `iam.api_keys` | the scoped organization, or the presented key hash |
+  | `iam.platform_admins` | owner-managed (RLS enabled, not forced; the application reads only its own row) |
+  | `tenancy.pack_versions` | platform table, no RLS |
+
+- **Audit log is append-only in two layers:** there is no UPDATE or DELETE policy, and a
+  `BEFORE UPDATE OR DELETE` trigger (`ops.reject_mutation`) blocks changes even for a role
+  that bypasses RLS.
+  - Partitions: `audit.ensure_partitions(n)` creates the current month plus the next `n`
+    months, and `audit_log_default` catches anything outside them.
+  - Every partition has RLS with no policies, so it can only be read through the parent.
+- **Memberships:** owners and admins must be organization-wide
+  (`CHECK role NOT IN ('owner','admin') OR workspace_id IS NULL`).
+- **Organizations** carry the full authoring columns (`created_by`, `updated_by`,
+  `row_version`) like every editable table.
+- **No server-only defaults in models.** Every server default also has a Python default, so
+  INSERT never needs `RETURNING`: under RLS, a freshly inserted row may not be readable back
+  yet. A test enforces this.
+- **Invitations:** a user row created by an organization admin is linked at first login only
+  when the provider has verified that exact email. An unverified email can never take over
+  an invited account.

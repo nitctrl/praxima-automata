@@ -24,7 +24,7 @@ from praxima.shared.db.base import (
     IdMixin,
     TenantMixin,
 )
-from praxima.shared.db.engine import create_engine, tenant_transaction
+from praxima.shared.db.engine import Scope, create_engine, tenant_transaction
 from praxima.shared.db.registry import import_models
 from praxima.shared.db.settings import ConfigurationError
 from praxima.shared.kernel.ids import new_id
@@ -113,6 +113,9 @@ class _FakeSession:
         self.calls.append((str(statement), params))
 
 
+SET = "SELECT set_config(:name, :value, true)"
+
+
 def test_tenant_transaction_scopes_workspace_and_organization():
     session = _FakeSession()
     workspace, organization = new_id(), new_id()
@@ -123,8 +126,8 @@ def test_tenant_transaction_scopes_workspace_and_organization():
 
     asyncio.run(run())
     assert session.calls == [
-        ("SELECT set_config('app.workspace_id', :value, true)", {"value": str(workspace)}),
-        ("SELECT set_config('app.organization_id', :value, true)", {"value": str(organization)}),
+        (SET, {"name": "app.workspace_id", "value": str(workspace)}),
+        (SET, {"name": "app.organization_id", "value": str(organization)}),
     ]
     assert session.committed
 
@@ -192,3 +195,12 @@ def test_upgrade_against_real_postgres_is_idempotent(monkeypatch):
     engine.dispose()
     assert schemas == set(MODULE_SCHEMAS)
     assert version == sorted(p.name[:4] for p in (ROOT / "db/migrations/versions").glob("*.py"))[-1]
+
+
+def test_scope_sets_only_what_is_known():
+    user, org = new_id(), new_id()
+    assert Scope(user_id=user, organization_id=org).settings() == [
+        ("app.organization_id", str(org)),
+        ("app.user_id", str(user)),
+    ]
+    assert Scope().settings() == []

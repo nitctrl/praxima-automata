@@ -1,0 +1,124 @@
+"""Reads for identity and access. RLS limits every query to the caller's scope."""
+
+import uuid
+from dataclasses import dataclass
+from datetime import datetime
+
+from sqlalchemy import ColumnElement, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
+
+from praxima.modules.iam.domain.rules import Principal, effective_role
+from praxima.modules.iam.infrastructure.models import Identity, Membership, User
+from praxima.shared.db.pagination import PageRequest, PageResult, fetch_page
+
+
+@dataclass(frozen=True)
+class MembershipView:
+    id: uuid.UUID
+    organization_id: uuid.UUID
+    workspace_id: uuid.UUID | None
+    role: str
+
+
+@dataclass(frozen=True)
+class MemberView:
+    membership_id: uuid.UUID
+    user_id: uuid.UUID
+    email: str
+    display_name: str | None
+    role: str
+    status: str
+    workspace_id: uuid.UUID | None
+    created_at: datetime
+
+
+async def principal_by_identity(
+    session: AsyncSession, provider: str, subject: str
+) -> tuple[Principal, str] | None:
+    """The user linked to a verified login, with the user's status. One query."""
+    row = (
+        await session.execute(
+            select(User.id, User.email, User.display_name, User.status)
+            .join(Identity, Identity.user_id == User.id)
+            .where(Identity.provider == provider, Identity.provider_subject == subject)
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    return Principal(row.id, row.email, row.display_name), row.status
+
+
+async def user_by_email(session: AsyncSession, email: str) -> User | None:
+    """Only finds users visible in the current scope (e.g. the verified login email)."""
+    return (
+        await session.execute(select(User).where(User.email == email.lower()))
+    ).scalar_one_or_none()
+
+
+async def active_memberships(session: AsyncSession, user_id: uuid.UUID) -> list[MembershipView]:
+    rows = await session.execute(
+        select(Membership.id, Membership.organization_id, Membership.workspace_id, Membership.role)
+        .where(Membership.user_id == user_id, Membership.status == "active")
+        .order_by(Membership.created_at, Membership.id)
+    )
+    return [MembershipView(r.id, r.organization_id, r.workspace_id, r.role) for r in rows]
+
+
+async def role_in(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
+) -> str | None:
+    """Effective role: the strongest active org-wide or matching workspace membership."""
+    scope: ColumnElement[bool] = Membership.workspace_id.is_(None)
+    if workspace_id is not None:
+        scope = or_(scope, Membership.workspace_id == workspace_id)
+    roles = await session.scalars(
+        select(Membership.role).where(
+            Membership.user_id == user_id,
+            Membership.organization_id == organization_id,
+            Membership.status == "active",
+            scope,
+        )
+    )
+    return effective_role(roles)
+
+
+async def members_page(
+    session: AsyncSession,
+    organization_id: uuid.UUID,
+    workspace_id: uuid.UUID | None,
+    page: PageRequest,
+) -> PageResult:
+    """Members of an organization (workspace_id None) or one workspace, newest first.
+
+    The user is joined in the same query: one round trip per page, no N+1.
+    """
+    statement = (
+        select(Membership)
+        .options(joinedload(Membership.user))
+        .where(
+            Membership.organization_id == organization_id,
+            Membership.status != "revoked",
+            Membership.workspace_id.is_(None)
+            if workspace_id is None
+            else Membership.workspace_id == workspace_id,
+        )
+    )
+    result = await fetch_page(session, statement, (Membership.created_at, Membership.id), page)
+    members = [
+        MemberView(
+            m.id,
+            m.user.id,
+            m.user.email,
+            m.user.display_name,
+            m.role,
+            m.status,
+            m.workspace_id,
+            m.created_at,
+        )
+        for m in result.items
+    ]
+    return PageResult(members, result.next_cursor)

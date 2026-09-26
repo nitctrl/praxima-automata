@@ -8,7 +8,7 @@ from alembic import context
 from dotenv import dotenv_values
 from sqlalchemy import create_engine, pool, text
 
-from praxima.shared.db.base import MODULE_SCHEMAS, Base
+from praxima.shared.db.base import MODULE_SCHEMAS, PARTITION_NAME, Base
 from praxima.shared.db.registry import import_models
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -44,11 +44,19 @@ def include_name(name: str | None, type_: str, parent_names: object) -> bool:
     return name in MODULE_SCHEMAS if type_ == "schema" else True
 
 
+def include_object(
+    obj: object, name: str | None, type_: str, reflected: bool, compare_to: object
+) -> bool:
+    # Monthly partitions are created by SQL functions, not models: never diff or drop them.
+    return not (type_ == "table" and reflected and name and PARTITION_NAME.fullmatch(name))
+
+
 def configure(**kwargs: object) -> None:
     context.configure(
         target_metadata=target_metadata,
         include_schemas=True,
         include_name=include_name,
+        include_object=include_object,
         version_table_schema=VERSION_SCHEMA,
         compare_type=True,
         **kwargs,  # type: ignore[arg-type]  # forwarded as-is to Alembic
