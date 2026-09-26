@@ -18,6 +18,7 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from http import HTTPStatus
 from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -28,6 +29,11 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from praxima.entrypoints.http.deps import SessionMaker
+from praxima.entrypoints.http.errors import problem_response
+from praxima.entrypoints.http.sessions import RateLimiter, SessionStore
+from praxima.entrypoints.http.setup import install
+from praxima.entrypoints.http.v1 import build_router
 from praxima.integrations.llm.gemini import GroundedAnswerer
 from praxima.integrations.vectors.qdrant import VectorSearch
 from praxima.modules.knowledge.application.retrieval import (
@@ -167,7 +173,12 @@ def create_app(
     gateway: SupabaseGateway | None = None,
     cipher: PiiCipher | None = None,
     answerer: GroundedAnswerer | None = None,
+    api_sessions: SessionMaker | None = None,
 ) -> FastAPI:
+    """The staff API: legacy /api routes plus the new /api/v1 REST API.
+
+    `api_sessions` connects /api/v1 to the new schema; without it v1 answers 503.
+    """
     config = settings or WebSettings.from_environment()
     backend = gateway or SupabaseGateway(config)
     sessions: dict[str, WebSession] = {}
@@ -179,6 +190,7 @@ def create_app(
     async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
         yield
         sessions.clear()
+        app.state.web_sessions.clear()
         await backend.client.aclose()
 
     app = FastAPI(
@@ -187,6 +199,12 @@ def create_app(
     hostname = urlsplit(config.origin).hostname
     assert hostname is not None  # WebSettings rejects an origin without a hostname.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=[hostname])
+    app.state.sessions = api_sessions
+    app.state.web_sessions = SessionStore()
+    app.state.identity_gateway = backend
+    app.state.login_limiter = RateLimiter(per_minute=10)
+    app.state.cookie_secure = config.origin.startswith("https:")
+    app.include_router(build_router(), prefix="/api/v1")
 
     def rate(key: str, maximum: int) -> None:
         now = time.monotonic()
@@ -214,7 +232,11 @@ def create_app(
                 # Document review is the only non-JSON, larger-than-form request surface.
                 upload = request.url.path.endswith("/documents/upload")
                 expected = "application/octet-stream" if upload else "application/json"
-                if expected not in request.headers.get("content-type", ""):
+                has_body = request.headers.get("content-length", "0") != "0" or (
+                    "transfer-encoding" in request.headers
+                )
+                # A body-less request (e.g. DELETE) has no content type to check.
+                if has_body and expected not in request.headers.get("content-type", ""):
                     raise HTTPException(415, "Unsupported content type.")
                 maximum = MAX_UPLOAD_BYTES if upload else 16384
                 if not upload and "/documents/" in request.url.path:
@@ -227,7 +249,9 @@ def create_app(
                 request._body = bytes(body)
             result = await call_next(request)
         except HTTPException as exc:
-            result = JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+            status = HTTPStatus(exc.status_code)
+            slug = status.phrase.lower().replace(" ", "-")
+            result = problem_response(status.value, slug, status.phrase, str(exc.detail))
         result.headers.update(
             {
                 "Cache-Control": "no-store",
@@ -242,6 +266,10 @@ def create_app(
         if config.origin.startswith("https:"):
             result.headers["Strict-Transport-Security"] = "max-age=31536000"
         return result
+
+    # Added last, so it is outermost: every response (even security refusals) gets a request
+    # id, and every error the same Problem Details shape.
+    install(app)
 
     async def data(request: Request) -> dict[str, Any]:
         try:

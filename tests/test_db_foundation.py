@@ -24,7 +24,7 @@ from praxima.shared.db.base import (
     IdMixin,
     TenantMixin,
 )
-from praxima.shared.db.engine import Scope, create_engine, tenant_transaction
+from praxima.shared.db.engine import Scope, create_engine, normalize_url, tenant_transaction
 from praxima.shared.db.registry import import_models
 from praxima.shared.db.settings import ConfigurationError
 from praxima.shared.kernel.ids import new_id
@@ -86,7 +86,8 @@ def test_constraint_names_are_deterministic():
 
 def test_engine_requires_psycopg_url():
     with pytest.raises(ConfigurationError):
-        create_engine("postgresql://user:pass@localhost/db")
+        create_engine("mysql://user:pass@localhost/db")
+    assert normalize_url("postgresql://u@h/db") == "postgresql+psycopg://u@h/db"
 
 
 class _FakeSession:

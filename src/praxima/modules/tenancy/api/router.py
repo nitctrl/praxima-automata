@@ -1,0 +1,37 @@
+"""Workspace endpoints. No business logic or queries here."""
+
+from fastapi import APIRouter
+
+from praxima.entrypoints.http.deps import UserSession, WorkspaceAccess
+from praxima.entrypoints.http.responses import Page, PageInfo
+from praxima.modules import iam, tenancy
+from praxima.modules.tenancy.api.schemas import WorkspaceOut, WorkspacePatch
+
+router = APIRouter(tags=["workspaces"])
+
+
+@router.get("/workspaces")
+async def list_workspaces(session: UserSession) -> Page[WorkspaceOut]:
+    """Every workspace the signed-in user belongs to (a short, complete list)."""
+    workspaces = [WorkspaceOut.of(w) for w in await tenancy.visible_workspaces(session)]
+    return Page(data=workspaces, page=PageInfo(limit=len(workspaces), next_cursor=None))
+
+
+@router.get("/workspaces/{workspace_id}")
+async def read_workspace(access: WorkspaceAccess) -> WorkspaceOut:
+    iam.require(access.actor, "workspace:read")
+    assert access.workspace_id is not None
+    return WorkspaceOut.of(await tenancy.get_workspace(access.session, access.workspace_id))
+
+
+@router.patch("/workspaces/{workspace_id}")
+async def update_workspace(body: WorkspacePatch, access: WorkspaceAccess) -> WorkspaceOut:
+    assert access.workspace_id is not None
+    await tenancy.update_workspace(
+        access.session,
+        access.actor,
+        workspace_id=access.workspace_id,
+        row_version=body.row_version,
+        changes=body.changes(),
+    )
+    return WorkspaceOut.of(await tenancy.get_workspace(access.session, access.workspace_id))

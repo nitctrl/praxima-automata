@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from praxima.modules.iam.domain.rules import Principal, effective_role
-from praxima.modules.iam.infrastructure.models import Identity, Membership, User
+from praxima.modules.iam.infrastructure.models import Identity, Membership, PlatformAdmin, User
 from praxima.shared.db.pagination import PageRequest, PageResult, fetch_page
 
 
@@ -122,3 +122,29 @@ async def members_page(
         for m in result.items
     ]
     return PageResult(members, result.next_cursor)
+
+
+async def is_platform_admin(session: AsyncSession, user_id: uuid.UUID) -> bool:
+    """RLS lets a user see only their own platform_admins row."""
+    return (
+        await session.scalar(select(PlatformAdmin.user_id).where(PlatformAdmin.user_id == user_id))
+    ) is not None
+
+
+async def membership_id_for(
+    session: AsyncSession,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    workspace_id: uuid.UUID | None,
+) -> uuid.UUID | None:
+    membership_id: uuid.UUID | None = await session.scalar(
+        select(Membership.id).where(
+            Membership.organization_id == organization_id,
+            Membership.user_id == user_id,
+            Membership.workspace_id.is_(None)
+            if workspace_id is None
+            else Membership.workspace_id == workspace_id,
+            Membership.status != "revoked",
+        )
+    )
+    return membership_id

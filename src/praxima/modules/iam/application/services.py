@@ -7,7 +7,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from praxima.modules import audit
-from praxima.modules.iam.application.selectors import principal_by_identity, user_by_email
+from praxima.modules.iam.application.selectors import (
+    membership_id_for,
+    principal_by_identity,
+    user_by_email,
+)
 from praxima.modules.iam.domain.rules import (
     ORG_WIDE_ROLES,
     ROLE_RANK,
@@ -157,4 +161,21 @@ async def revoke_membership(
         action="membership.revoke",
         resource_type="membership",
         resource_id=membership.id,
+    )
+
+
+async def revoke_membership_of(
+    session: AsyncSession,
+    actor: Actor,
+    *,
+    organization_id: uuid.UUID,
+    user_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
+) -> None:
+    """Revoke a user's org-wide (workspace_id None) or workspace membership."""
+    membership_id = await membership_id_for(session, organization_id, user_id, workspace_id)
+    if membership_id is None:
+        raise NotFound("Membership not found.")
+    await revoke_membership(
+        session, actor, organization_id=organization_id, membership_id=membership_id
     )

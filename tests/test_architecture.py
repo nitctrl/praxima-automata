@@ -39,12 +39,20 @@ def _violations() -> set[tuple[str, str]]:
             domain = ".domain." in f"{module}." and in_modules
             if prod and target.startswith("praxima.dev"):
                 bad.add((module, target))  # rule 7: production never imports dev/
-            if in_modules and target.startswith(("praxima.runtime", "praxima.entrypoints")):
+            router = in_modules and ".api." in f"{module}."
+            http_plumbing = target.startswith("praxima.entrypoints.http")
+            below = target.startswith(("praxima.runtime", "praxima.entrypoints"))
+            if in_modules and below and not (router and http_plumbing):
                 bad.add((module, target))  # modules sit below the runtime and entrypoints
-            if target.startswith("praxima.entrypoints") and not module.startswith(
-                "praxima.entrypoints"
+            if (
+                target.startswith("praxima.entrypoints")
+                and not module.startswith("praxima.entrypoints")
+                and not (router and http_plumbing)
             ):
-                bad.add((module, target))  # nothing depends on an entrypoint
+                bad.add((module, target))  # only module routers use the shared HTTP plumbing
+            if module.startswith("praxima.entrypoints.http") and ".api." in f"{target}.":
+                if not module.endswith(".v1"):
+                    bad.add((module, target))  # plumbing never imports routers (no cycles)
             if domain and target.split(".")[0] in IO_LIBRARIES:
                 bad.add((module, target))  # rule 1: domain does no I/O
             if domain and any(

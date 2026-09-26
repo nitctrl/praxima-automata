@@ -218,7 +218,11 @@ Dependency rules (`tests/test_architecture.py` enforces them):
    env or clock reads (inject time).
 2. `application/` may use SQLAlchemy and its own module's `infrastructure/models.py`,
    plus `domain/`. It never imports `fastapi` or another module's internals.
-3. SQLAlchemy is allowed only in `shared/db`, `application/` and `infrastructure/`.
+3. SQLAlchemy is allowed only in `shared/db`, `entrypoints/http` (the per-request
+   session), `application/` and `infrastructure/`. Module routers (`api/`) may use the shared
+   HTTP plumbing in `entrypoints/http` (auth dependencies, `Page`, errors). Nothing else in a
+   module may import an entrypoint, and the plumbing never imports routers except in
+   `entrypoints/http/v1.py`, which mounts them.
    Provider SDKs (`httpx` clients, `qdrant_client`, `google.genai`, `livekit`, `fastembed`)
    live only in `infrastructure/` or `integrations/`.
 4. **Modules talk to each other only through their `application` public interface** (the
@@ -444,9 +448,10 @@ POST-for-everything) migrate to this. Change the backend and
 
 | Method | Path (under `/api/v1`) | Notes |
 | --- | --- | --- |
-| POST / GET / DELETE | `/auth/session` | sign in / current session + CSRF + memberships / sign out |
+| POST / GET / DELETE | `/auth/session` | ✅ sign in (cookie `praxima_session`) / current user + CSRF + memberships / sign out |
+| GET | `/workspaces` | ✅ every workspace the signed-in user belongs to |
 | GET | `/organizations/{orgId}/workspaces` | |
-| GET, PATCH | `/workspaces/{wsId}` | settings: languages, timezone, limits |
+| GET, PATCH | `/workspaces/{wsId}` | ✅ read (viewer+) / partial update with `row_version` (manager+) |
 | GET | `/workspaces/{wsId}/overview` | today's summary (was `/today`) |
 | GET, POST / GET, PATCH | `/workspaces/{wsId}/agents[/{agentId}]` | persona, messages, voice config |
 | GET | `/workspaces/{wsId}/entity-types` | installed from the pack, plus custom types |
@@ -461,8 +466,14 @@ POST-for-everything) migrate to this. Change the backend and
 | POST | `/workspaces/{wsId}/work-items/{id}/contact-reveal` | audited; stays POST |
 | GET / GET | `/workspaces/{wsId}/conversations[/{id}]` | sanitized outcomes only |
 | POST | `/workspaces/{wsId}/agents/{agentId}/test-queries` | same retrieval path as calls; `is_test` |
-| GET, PUT, DELETE | `/workspaces/{wsId}/memberships[/{userId}]` | owner/admin only |
+| GET | `/workspaces/{wsId}/members`, `/organizations/{orgId}/members` | ✅ paged member list (manager+) |
+| PUT, DELETE | `/workspaces/{wsId}/memberships/{userId}`, `/organizations/{orgId}/memberships/{userId}` | ✅ grant / revoke a role (admin+; never above your own role) |
 | GET | `/health` (liveness), `/ready` (DB + critical deps) | unauthenticated, no data |
+
+✅ = implemented (step 1b). Protected endpoints take `CurrentUser`, `UserSession` or
+`WorkspaceAccess` / `OrganizationAccess` from `entrypoints/http/deps.py`. These resolve the
+caller's role (404 when they have none, so tenants aren't revealed), scope RLS, and commit
+before responding.
 
 Rules:
 - Plural kebab-case resources; the tenant is in the path and **re-authorized** on every

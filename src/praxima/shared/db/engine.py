@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import NullPool
 
 from praxima.shared.db.settings import ConfigurationError
 
@@ -50,15 +51,35 @@ class Scope:
         return [(name, str(value)) for name, value in values.items() if value is not None]
 
 
-def create_engine(url: str, *, pool_size: int = 5) -> AsyncEngine:
-    """Create the async engine for one database role (api, runtime or worker)."""
+def normalize_url(url: str) -> str:
+    """Accept the plain `postgresql://` form tools print; use the psycopg 3 driver."""
+    for prefix in ("postgresql://", "postgres://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url.removeprefix(prefix)
+    return url
+
+
+def create_engine(url: str, *, pool_size: int = 5, pooled: bool = True) -> AsyncEngine:
+    """Create the async engine for one database role (api, runtime or worker).
+
+    `pooled=False` opens a connection per use (tests that span event loops).
+    """
+    url = normalize_url(url)
     if not url.startswith("postgresql+psycopg://"):
-        raise ConfigurationError("Use a postgresql+psycopg:// URL for the application database.")
+        raise ConfigurationError("Use a postgresql:// URL for the application database.")
+    if not pooled:
+        return create_async_engine(url, poolclass=NullPool, hide_parameters=True)
     return create_async_engine(url, pool_size=pool_size, pool_pre_ping=True, hide_parameters=True)
 
 
 def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     return async_sessionmaker(engine, expire_on_commit=False)
+
+
+async def apply_scope(session: AsyncSession, scope: Scope) -> None:
+    """Set (or narrow) the RLS scope of the session's current transaction."""
+    for name, value in scope.settings():
+        await session.execute(_SET, {"name": name, "value": value})
 
 
 @asynccontextmanager
@@ -71,8 +92,7 @@ async def scoped_transaction(
     carries one caller's scope into another request. Commits on success, rolls back on error.
     """
     async with sessions() as session, session.begin():
-        for name, value in scope.settings():
-            await session.execute(_SET, {"name": name, "value": value})
+        await apply_scope(session, scope)
         yield session
 
 
