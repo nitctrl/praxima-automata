@@ -112,11 +112,20 @@ async def upload_document(
     workspace_id: uuid.UUID,
     filename: str,
     data: bytes,
-    category: str,
+    category: str | None = None,
     replaces: uuid.UUID | None = None,
 ) -> uuid.UUID:
-    """Extract an upload into a new version awaiting review. Returns the version id."""
+    """Extract an upload into a new version awaiting review. Returns the version id.
+
+    A new document needs a category; a new version (`replaces`) defaults to its document's.
+    """
     require(actor, "knowledge:write")
+    existing: Document | None = None
+    if replaces is not None:
+        existing = await session.get(Document, replaces)
+        if existing is None or existing.deleted_at is not None:
+            raise NotFound("Document not found.")
+        category = category or existing.category
     pack = await tenancy.installed_pack(session, workspace_id)
     if category not in pack.document_categories:
         raise ValidationFailed(errors=[FieldError("category", "Unknown document category.")])
@@ -124,7 +133,7 @@ async def upload_document(
         extraction = extract(filename, data)
     except DocumentRejected as exc:
         raise ValidationFailed(str(exc)) from None  # messages are fixed, value-free text
-    if replaces is None:
+    if existing is None:
         document = Document(
             workspace_id=workspace_id,
             title=extraction.title,
@@ -134,10 +143,7 @@ async def upload_document(
         session.add(document)
         version_no = 1
     else:
-        found = await session.get(Document, replaces)
-        if found is None or found.deleted_at is not None:
-            raise NotFound("Document not found.")
-        document = found
+        document = existing
         latest = await session.scalar(
             select(func.max(DocumentVersion.version_no)).where(
                 DocumentVersion.document_id == document.id
@@ -175,9 +181,15 @@ async def upload_document(
     return version.id
 
 
-async def _version(session: AsyncSession, version_id: uuid.UUID) -> DocumentVersion:
+async def _version(
+    session: AsyncSession, version_id: uuid.UUID, document_id: uuid.UUID | None = None
+) -> DocumentVersion:
+    """A live version; with `document_id`, it must belong to that document (else 404)."""
     version = await session.get(DocumentVersion, version_id)
-    if version is None or version.deleted_at is not None:
+    wrong_document = (
+        document_id is not None and version is not None and (version.document_id != document_id)
+    )
+    if version is None or version.deleted_at is not None or wrong_document:
         raise NotFound("Document version not found.")
     return version
 
@@ -204,11 +216,12 @@ async def replace_sections(
     version_id: uuid.UUID,
     row_version: int,
     sections: list[SectionDraft],
+    document_id: uuid.UUID | None = None,
 ) -> None:
     """Save the reviewed wording of a version still under review (replaces all sections)."""
     require(actor, "knowledge:write")
     _check_sections(sections)
-    version = await _version(session, version_id)
+    version = await _version(session, version_id, document_id)
     if version.row_version != row_version:
         raise Conflict("This version was changed by someone else. Reload and try again.")
     if version.status != "needs_review":
@@ -305,10 +318,11 @@ async def set_version_status(
     row_version: int,
     status: str,
     index: KnowledgeIndex | None = None,
+    document_id: uuid.UUID | None = None,
 ) -> None:
     """Publish (replacing the live version), reject, or archive a document version."""
     require(actor, "knowledge:publish")
-    version = await _version(session, version_id)
+    version = await _version(session, version_id, document_id)
     if version.row_version != row_version:
         raise Conflict("This version was changed by someone else. Reload and try again.")
     document = await session.get(Document, version.document_id)

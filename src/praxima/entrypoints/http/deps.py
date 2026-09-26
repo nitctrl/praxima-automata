@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from praxima.entrypoints.http.identity import IdentityGateway
 from praxima.entrypoints.http.sessions import COOKIE_NAME, RateLimiter, SessionStore, WebSession
 from praxima.modules import iam, tenancy
+from praxima.modules.knowledge import KnowledgeIndex
 from praxima.shared.db.engine import Scope, apply_scope, scoped_transaction
 from praxima.shared.db.pagination import DEFAULT_LIMIT, MAX_LIMIT, PageRequest
 from praxima.shared.errors import NotFound, PermissionDenied, Unauthenticated, Unavailable
@@ -160,3 +161,11 @@ async def narrow_to_workspace(access: Access, workspace_id: uuid.UUID) -> Access
         ),
     )
     return Access(access.session, access.actor, access.organization_id, workspace_id)
+
+
+def knowledge_index(request: Request) -> KnowledgeIndex | None:
+    """The Qdrant index when configured; None means keyword search only (never an error)."""
+    return getattr(request.app.state, "knowledge_index", None)
+
+
+Index = Annotated[KnowledgeIndex | None, Depends(knowledge_index)]

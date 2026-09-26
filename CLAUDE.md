@@ -470,9 +470,12 @@ POST-for-everything) migrate to this. Change the backend and
 | GET | `/workspaces/{wsId}/entities/{id}/relations`, `…/availability` | ✅ links (both directions) and hours |
 | POST / PATCH / DELETE | `/workspaces/{wsId}/relations[/{id}]` | ✅ pack-checked links; PATCH sets `publication_status` |
 | POST / PATCH | `/workspaces/{wsId}/availability-rules`, `/availability-exceptions` | ✅ weekly hours (RRULE) and dated exceptions |
-| GET, POST / GET, PATCH | `/workspaces/{wsId}/announcements[/{id}]` | live updates |
-| GET, POST / GET, PATCH, DELETE | `/workspaces/{wsId}/faqs[/{id}]` | approved question/answer pairs |
-| GET, POST / GET, PATCH | `/workspaces/{wsId}/documents[/{id}]` | upload is octet-stream; `status` is PATCHable |
+| GET, POST / GET, PATCH, DELETE | `/workspaces/{wsId}/announcements[/{id}]` | ✅ live updates; `?active=true` = in effect now; times must include a zone |
+| GET, POST / GET, PATCH, DELETE | `/workspaces/{wsId}/faqs[/{id}]` | ✅ approved question/answer pairs; PATCH also sets `publication_status` |
+| GET, POST / GET, DELETE | `/workspaces/{wsId}/documents[/{id}]` | ✅ POST uploads raw bytes (`application/octet-stream`, `?filename=&category=`, ≤ 5 MB); DELETE archives |
+| POST | `/workspaces/{wsId}/documents/{id}/versions` | ✅ upload a new version (goes to review) |
+| GET, PATCH / PUT | `…/documents/{id}/versions/{versionId}[/sections]` | ✅ review (PUT sections, only while under review); PATCH `status` = published / rejected / archived |
+| GET | `/workspaces/{wsId}/knowledge/search?q=` | ✅ keyword + Qdrant (when configured) search of published documents |
 | POST | `/workspaces/{wsId}/agents/{agentId}/releases/preview` | snapshot + digest |
 | GET, POST | `/workspaces/{wsId}/agents/{agentId}/releases` | list / publish previewed digest; rollback = publish `{source}` |
 | GET / GET, PATCH | `/workspaces/{wsId}/work-items[/{id}]` | `?kind=&stage=`; PATCH `{stage}` |
@@ -483,7 +486,7 @@ POST-for-everything) migrate to this. Change the backend and
 | PUT, DELETE | `/workspaces/{wsId}/memberships/{userId}`, `/organizations/{orgId}/memberships/{userId}` | ✅ grant / revoke a role (admin+; never above your own role) |
 | GET | `/health` (liveness), `/ready` (DB + critical deps) | unauthenticated, no data |
 
-✅ = implemented (steps 1b and 2b). Protected endpoints take `CurrentUser`, `UserSession` or
+✅ = implemented (steps 1b, 2b and 3b). Protected endpoints take `CurrentUser`, `UserSession` or
 `WorkspaceAccess` / `OrganizationAccess` from `entrypoints/http/deps.py`. These resolve the
 caller's role (404 when they have none, so tenants aren't revealed), scope RLS, and commit
 before responding.

@@ -189,11 +189,17 @@ async def get_document(
 
 
 async def get_version(
-    session: AsyncSession, version_id: uuid.UUID
+    session: AsyncSession, version_id: uuid.UUID, document_id: uuid.UUID | None = None
 ) -> tuple[VersionView, list[SectionView]]:
-    """A version with its reviewed sections, in order (two queries)."""
+    """A version with its reviewed sections, in order (two queries).
+
+    With `document_id`, the version must belong to that document (else 404).
+    """
     version = await session.get(DocumentVersion, version_id)
-    if version is None or version.deleted_at is not None:
+    wrong_document = (
+        document_id is not None and version is not None and (version.document_id != document_id)
+    )
+    if version is None or version.deleted_at is not None or wrong_document:
         raise NotFound("Document version not found.")
     sections = await session.scalars(
         select(DocumentSection)

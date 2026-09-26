@@ -13,6 +13,7 @@ shared edge rate limits are a production gate, not an implicit in-memory promise
 import base64
 import logging
 import os
+import re
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -36,6 +37,7 @@ from praxima.entrypoints.http.setup import install
 from praxima.entrypoints.http.v1 import build_router
 from praxima.integrations.llm.gemini import GroundedAnswerer
 from praxima.integrations.vectors.qdrant import VectorSearch
+from praxima.modules.knowledge import KnowledgeIndex
 from praxima.modules.knowledge.application.retrieval import (
     HybridRetriever,
     active_quick_info,
@@ -52,6 +54,8 @@ from praxima.modules.releases.domain.snapshot import Snapshot
 from praxima.shared.security.privacy import PiiCipher
 
 logger = logging.getLogger(__name__)
+# /api/v1 document uploads (raw bytes): a new document, or a new version of one.
+V1_UPLOAD = re.compile(r"/api/v1/workspaces/[^/]+/documents(/[^/]+/versions)?")
 EDIT_FIELDS: dict[str, str] = {
     "temporary_notices": "location_id,doctor_id,service_id,notice_type,"
     "public_message,internal_note,"
@@ -174,6 +178,7 @@ def create_app(
     cipher: PiiCipher | None = None,
     answerer: GroundedAnswerer | None = None,
     api_sessions: SessionMaker | None = None,
+    knowledge_index: KnowledgeIndex | None = None,
 ) -> FastAPI:
     """The staff API: legacy /api routes plus the new /api/v1 REST API.
 
@@ -204,6 +209,7 @@ def create_app(
     app.state.identity_gateway = backend
     app.state.login_limiter = RateLimiter(per_minute=10)
     app.state.cookie_secure = config.origin.startswith("https:")
+    app.state.knowledge_index = knowledge_index  # Qdrant; None → keyword search only
     app.include_router(build_router(), prefix="/api/v1")
 
     def rate(key: str, maximum: int) -> None:
@@ -230,7 +236,9 @@ def create_app(
                 if request.headers.get("origin") != config.origin:
                     raise HTTPException(403, "Origin verification failed.")
                 # Document review is the only non-JSON, larger-than-form request surface.
-                upload = request.url.path.endswith("/documents/upload")
+                upload = request.url.path.endswith("/documents/upload") or (
+                    request.method == "POST" and V1_UPLOAD.fullmatch(request.url.path) is not None
+                )
                 expected = "application/octet-stream" if upload else "application/json"
                 has_body = request.headers.get("content-length", "0") != "0" or (
                     "transfer-encoding" in request.headers

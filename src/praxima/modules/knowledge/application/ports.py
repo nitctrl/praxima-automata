@@ -17,7 +17,10 @@ class IndexedChunk:
 class KnowledgeIndex(Protocol):
     """Semantic index of published chunks. Every call is scoped to one workspace."""
 
-    model: str
+    @property
+    def model(self) -> str:
+        """The embedding model name, recorded on each indexed chunk."""
+        ...
 
     async def upsert(self, chunks: Sequence[IndexedChunk]) -> None: ...
 
