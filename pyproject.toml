@@ -74,7 +74,7 @@ select = ["E", "F", "I", "UP"]
 
 [tool.mypy]
 python_version = "3.10"
-files = ["src/praxima", "scripts", "db/migrations"]
+files = ["main.py", "src/praxima", "scripts", "db/migrations"]
 # Untyped voice POC worker, unchecked as before the move (was src/agent.py).
 exclude = ["src/praxima/entrypoints/voice_worker\\.py$"]
 mypy_path = "src"

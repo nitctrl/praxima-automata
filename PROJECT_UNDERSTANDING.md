@@ -64,7 +64,7 @@ flowchart LR
         Q[(Qdrant: voice collection)]
     end
     subgraph "B. New platform"
-        API[FastAPI /api/v1<br/>scripts/dashboard.py]
+        API[FastAPI /api/v1<br/>main.py]
         NEW[(PostgreSQL 16+<br/>iam, tenancy, agents, catalog,<br/>knowledge, engagement, audit, ops)]
         QK[(Qdrant: praxima_knowledge)]
     end
@@ -347,7 +347,7 @@ Guarantees enforced in SQL:
 
 ## 7. [A] The legacy authoring side: how the voice snapshot gets published
 
-`uv run python scripts/dashboard.py` starts a FastAPI app on `http://127.0.0.1:8080`
+`uv run uvicorn main:app --reload --port 8080` (the app is built in root `main.py`) starts a FastAPI app on `http://127.0.0.1:8080`
 (`src/praxima/entrypoints/api.py`). The same app serves the legacy `/api/*` routes described
 here **and** the new `/api/v1` (section 9).
 
@@ -644,7 +644,7 @@ uv run python scripts/database.py provision-runtime --confirm-development-projec
 # B. new platform schema (external Postgres 16+; DB_OWNER_DATABASE_URL in .env)
 uv run alembic upgrade head
 
-uv run python scripts/dashboard.py    # API on 127.0.0.1:8080 (legacy /api + /api/v1)
+uv run uvicorn main:app --reload --port 8080   # API (main.py): legacy /api + /api/v1
 cd ../frontend && corepack pnpm dev   # console on http://127.0.0.1:3000
 uv run src/agent.py console           # local mic test
 uv run src/agent.py start             # phone worker (run exactly one)
@@ -684,7 +684,8 @@ run `uv run alembic check` for migration drift.
 | `src/praxima/packs/` | `loader.py` + `clinic/` pack (manifest, entity types, work item kinds, prompts) |
 | `db/migrations/` | Alembic env + revisions `0001`–`0005` |
 | `supabase/migrations/` | Legacy schema (frozen once step 4 moves the voice path) |
-| `scripts/dashboard.py`, `scripts/database.py` | Start the API; legacy migrate/seed/provision |
+| `main.py` | Builds the ASGI `app` from the environment (`uvicorn main:app`) |
+| `scripts/dashboard.py`, `scripts/database.py` | Run the API without reload; legacy migrate/seed/provision |
 | `docs/database/database-schema.md` | Target data model; §16–§19 record what is implemented |
 | `CLAUDE.md` | Rules, architecture, API contract, conventions |
 | `tests/` | pytest: unit, API contract, architecture rules, opt-in DB tests |

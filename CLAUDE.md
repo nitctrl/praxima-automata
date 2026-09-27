@@ -121,7 +121,8 @@ Package manager: **uv**. The Python target is 3.10 (the venv runs 3.12).
 uv sync                                   # install (add --extra semantic for fastembed)
 uv run src/agent.py console               # local microphone test
 uv run src/agent.py start                 # LiveKit worker
-uv run python scripts/dashboard.py        # dashboard API on http://127.0.0.1:8080 (JSON only)
+uv run uvicorn main:app --reload --port 8080   # API on http://127.0.0.1:8080 (app in main.py)
+uv run python scripts/dashboard.py        # same API without reload, access log or proxy headers
 docker compose up -d qdrant               # optional semantic search (today)
 
 uv run alembic upgrade head               # apply new-schema revisions (DB_OWNER_DATABASE_URL)
@@ -161,7 +162,7 @@ into a service later.
 | Process | Entrypoint (target) | Responsibility |
 | --- | --- | --- |
 | Voice runtime | `entrypoints/voice_worker.py` (today `src/agent.py`) | LiveKit worker: resolve agent, load pinned release, run the conversation, tools, safety |
-| HTTP API | `entrypoints/api.py` (today `scripts/dashboard.py`) | Staff dashboard and management API, `/api/v1` |
+| HTTP API | `entrypoints/api.py` (wired up in root `main.py`) | Staff dashboard and management API, `/api/v1` |
 | Background jobs | `entrypoints/jobs.py` | Retention/erasure, partition maintenance, usage rollups, outbox dispatch, re-indexing |
 | CLI / ops | `scripts/*.py` → `entrypoints/cli.py` | Migrations, seeding packs, provisioning |
 | Staff UI | `../frontend` | Talks only to the HTTP API |
