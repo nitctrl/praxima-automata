@@ -1481,3 +1481,17 @@ endpoints in `CLAUDE.md` §6). Creating a workspace now installs its work item k
   of the `PiiCipher` keyring (`CLINIC_PII_KEYS`), which is a string today.
 - **New permissions:** `crm:read` (viewer), `crm:write` (staff), `crm:assign` (manager),
   `pii:reveal` (staff), `pii:erase` (admin). Assignees must hold a role in the workspace.
+
+## 20. Implemented (revision 0006: self-serve organizations)
+
+- **New policy:** `organizations_self_serve`, a second INSERT policy on
+  `tenancy.organizations`. Permissive policies are OR-ed with the platform-admin one.
+- **What it allows:** a signed-in user may insert an organization only if **they** are its
+  creator (`created_by = iam.current_user_id()`) and they **belong to no organization yet**.
+  That is one self-serve organization per person.
+- **The on/off switch** is the API's job (`PRAXIMA_SELF_SIGNUP`); the database enforces the
+  limits either way.
+- **Owner membership:** `tenancy.create_own_organization` then scopes to the new
+  organization and grants its owner membership through `iam.set_membership`, both audited.
+- **Tests:** `tests/test_api_v1_registration_db.py` checks the policy directly with forced
+  RLS: not for someone else, and not a second one.

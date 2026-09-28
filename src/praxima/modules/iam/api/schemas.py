@@ -21,6 +21,13 @@ class SignIn(Strict):
     password: str = Field(min_length=1, max_length=1024)
 
 
+class Registration(Strict):
+    email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+$")
+    # 72 bytes is bcrypt's limit at the identity provider.
+    password: str = Field(min_length=8, max_length=72)
+    display_name: str = Field(min_length=1, max_length=200)
+
+
 class UserOut(BaseModel):
     id: uuid.UUID
     email: str
@@ -49,6 +56,13 @@ class SessionOut(BaseModel):
     csrf: str
     user: UserOut
     memberships: list[MembershipOut]
+
+
+class RegistrationOut(BaseModel):
+    """`signed_in` carries the new session; `confirmation_required` means check your email."""
+
+    status: Literal["signed_in", "confirmation_required"]
+    session: SessionOut | None = None
 
 
 class MemberOut(BaseModel):

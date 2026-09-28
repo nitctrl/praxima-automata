@@ -181,11 +181,13 @@ def create_app(
     api_sessions: SessionMaker | None = None,
     knowledge_index: KnowledgeIndex | None = None,
     vault: Vault | None = None,
+    self_signup: bool = False,
 ) -> FastAPI:
     """The staff API: legacy /api routes plus the new /api/v1 REST API.
 
     `api_sessions` connects /api/v1 to the new schema; without it v1 answers 503.
     `vault` holds the CRM personal-data keys; without it those endpoints answer 503.
+    `self_signup` lets anyone register and create their own organization.
     """
     config = settings or WebSettings.from_environment()
     backend = gateway or SupabaseGateway(config)
@@ -214,6 +216,7 @@ def create_app(
     app.state.cookie_secure = config.origin.startswith("https:")
     app.state.knowledge_index = knowledge_index  # Qdrant; None → keyword search only
     app.state.vault = vault
+    app.state.self_signup = self_signup
     app.include_router(build_router(), prefix="/api/v1")
 
     def rate(key: str, maximum: int) -> None:

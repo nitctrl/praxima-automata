@@ -65,7 +65,13 @@ def cookie_secure(request: Request) -> bool:
     return bool(getattr(request.app.state, "cookie_secure", True))
 
 
+def self_signup(request: Request) -> bool:
+    """Whether anyone may register and create their own organization (PRAXIMA_SELF_SIGNUP)."""
+    return bool(getattr(request.app.state, "self_signup", False))
+
+
 Sessions = Annotated[async_sessionmaker[AsyncSession], Depends(session_factory)]
+SelfSignup = Annotated[bool, Depends(self_signup)]
 SecureCookies = Annotated[bool, Depends(cookie_secure)]
 WebSessions = Annotated[SessionStore, Depends(web_sessions)]
 Gateway = Annotated[IdentityGateway, Depends(identity_gateway)]

@@ -9,8 +9,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from praxima.modules import audit
-from praxima.modules.iam import Actor, require, set_membership
+from praxima.modules.iam import Actor, active_memberships, require, set_membership
 from praxima.modules.tenancy.infrastructure.models import Organization, PackVersion, Workspace
+from praxima.shared.db.engine import Scope, apply_scope
 from praxima.shared.db.errors import translate_db_errors
 from praxima.shared.errors import (
     Conflict,
@@ -78,6 +79,36 @@ async def create_organization(
         session,
         organization_id=organization.id,
         actor_id=actor.user_id,
+        action="organization.create",
+        resource_type="organization",
+        resource_id=organization.id,
+    )
+    return organization.id
+
+
+async def create_own_organization(
+    session: AsyncSession, user_id: uuid.UUID, *, slug: str, name: str
+) -> uuid.UUID:
+    """Self-serve sign-up: a person with no organization creates one and becomes its owner.
+
+    The caller (the API) decides whether self-serve sign-up is enabled; the database policy
+    `organizations_self_serve` enforces "own it, and only if you have no organization yet".
+    """
+    if await active_memberships(session, user_id):
+        raise Conflict("You already belong to an organization.")
+    organization = Organization(slug=slug, name=name, created_by=user_id)
+    with translate_db_errors(duplicate="An organization with this short name already exists."):
+        session.add(organization)
+        await session.flush()
+    await apply_scope(session, Scope(user_id=user_id, organization_id=organization.id))
+    owner = Actor(user_id, "owner")
+    await set_membership(
+        session, owner, organization_id=organization.id, user_id=user_id, role="owner"
+    )
+    await audit.record(
+        session,
+        organization_id=organization.id,
+        actor_id=user_id,
         action="organization.create",
         resource_type="organization",
         resource_id=organization.id,

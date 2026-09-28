@@ -36,6 +36,7 @@ ENV_NAMES = (
     "CLINIC_PII_KEYS",
     "CLINIC_PII_KEY_VERSION",
     "PRAXIMA_LOOKUP_KEY",
+    "PRAXIMA_SELF_SIGNUP",
 )
 
 
@@ -84,6 +85,8 @@ def build_app() -> FastAPI:
         api_sessions=api_sessions,
         knowledge_index=knowledge_index,
         vault=vault,
+        # Anyone may register and create their own organization (off unless "true").
+        self_signup=os.environ.get("PRAXIMA_SELF_SIGNUP", "").strip().lower() == "true",
     )
 
 

@@ -79,3 +79,16 @@ class PackOut(BaseModel):
     version: str
     name: str
     industry: str
+
+
+class OrganizationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+    slug: str = Field(min_length=2, max_length=63, pattern=r"^[a-z0-9][a-z0-9-]{1,62}$")
+
+
+class OrganizationOut(BaseModel):
+    id: uuid.UUID
+    slug: str
+    name: str

@@ -456,6 +456,8 @@ POST-for-everything) migrate to this. Change the backend and
 | Method | Path (under `/api/v1`) | Notes |
 | --- | --- | --- |
 | POST / GET / DELETE | `/auth/session` | ✅ sign in (cookie `praxima_session`) / current user + CSRF + memberships / sign out |
+| POST | `/auth/registrations` | ✅ self-service sign-up via Supabase Auth; signs in, or asks to confirm the email (only with `PRAXIMA_SELF_SIGNUP=true`) |
+| POST | `/organizations` | ✅ create your first organization and become its owner (self-service only; RLS allows one per person) |
 | GET | `/workspaces` | ✅ every workspace the signed-in user belongs to |
 | GET | `/packs` | ✅ pack versions available to new workspaces |
 | POST | `/organizations/{orgId}/workspaces` | ✅ create a workspace and install its pack (admin+) |

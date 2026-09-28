@@ -22,6 +22,7 @@ if TYPE_CHECKING:  # real imports for type checkers; loaded lazily at runtime
         WorkspaceChanges,
         WorkspaceDraft,
         create_organization,
+        create_own_organization,
         create_workspace,
         update_workspace,
     )
@@ -38,6 +39,7 @@ _EXPORTS = {
     "WorkspaceChanges": "praxima.modules.tenancy.application.services",
     "WorkspaceDraft": "praxima.modules.tenancy.application.services",
     "create_organization": "praxima.modules.tenancy.application.services",
+    "create_own_organization": "praxima.modules.tenancy.application.services",
     "create_workspace": "praxima.modules.tenancy.application.services",
     "update_workspace": "praxima.modules.tenancy.application.services",
 }
@@ -49,6 +51,7 @@ __all__ = [
     "WorkspaceView",
     "available_packs",
     "create_organization",
+    "create_own_organization",
     "create_workspace",
     "get_workspace",
     "installed_pack",

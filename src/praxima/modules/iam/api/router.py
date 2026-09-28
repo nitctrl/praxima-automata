@@ -11,12 +11,13 @@ from praxima.entrypoints.http.deps import (
     OrganizationAccess,
     Paging,
     SecureCookies,
+    SelfSignup,
     Sessions,
     UserSession,
     WebSessions,
     WorkspaceAccess,
 )
-from praxima.entrypoints.http.identity import sign_in, verify_password
+from praxima.entrypoints.http.identity import register, sign_in, verify_password
 from praxima.entrypoints.http.responses import Page
 from praxima.entrypoints.http.sessions import COOKIE_NAME
 from praxima.modules import iam
@@ -25,11 +26,14 @@ from praxima.modules.iam.api.schemas import (
     MemberOut,
     MembershipOut,
     OrganizationRoleIn,
+    Registration,
+    RegistrationOut,
     SessionOut,
     SignIn,
     UserOut,
     WorkspaceRoleIn,
 )
+from praxima.shared.errors import PermissionDenied
 
 router = APIRouter()
 
@@ -44,6 +48,28 @@ def _session_out(
         ),
         memberships=[MembershipOut.of(m) for m in memberships],
     )
+
+
+def _start_session(
+    request: Request,
+    response: Response,
+    store: WebSessions,
+    secure: bool,
+    principal: iam.Principal,
+    memberships: list[iam.MembershipView],
+) -> SessionOut:
+    store.delete(request.cookies.get(COOKIE_NAME, ""))  # no session fixation
+    sid, web = store.create(principal.user_id, principal.email, principal.display_name)
+    response.set_cookie(
+        COOKIE_NAME,
+        sid,
+        max_age=store.ttl,
+        httponly=True,
+        secure=secure,
+        samesite="strict",
+        path="/api",
+    )
+    return _session_out(web.csrf, principal, memberships)
 
 
 @router.post("/auth/session", tags=["auth"])
@@ -61,18 +87,37 @@ async def create_session(
     limiter.hit(request.client.host if request.client else "unknown")
     identity = await verify_password(gateway, body.email, body.password)
     principal, memberships = await sign_in(sessions, identity)
-    store.delete(request.cookies.get(COOKIE_NAME, ""))  # no session fixation
-    sid, web = store.create(principal.user_id, principal.email, principal.display_name)
-    response.set_cookie(
-        COOKIE_NAME,
-        sid,
-        max_age=store.ttl,
-        httponly=True,
-        secure=secure,
-        samesite="strict",
-        path="/api",
+    return _start_session(request, response, store, secure, principal, memberships)
+
+
+@router.post("/auth/registrations", tags=["auth"], status_code=status.HTTP_201_CREATED)
+async def create_registration(
+    body: Registration,
+    request: Request,
+    response: Response,
+    gateway: Gateway,
+    sessions: Sessions,
+    store: WebSessions,
+    limiter: LoginLimiter,
+    secure: SecureCookies,
+    allowed: SelfSignup,
+) -> RegistrationOut:
+    """Create an account (only when self-service sign-up is enabled).
+
+    Signs the new user in when the identity provider allows it straight away; otherwise
+    they confirm their email, then sign in.
+    """
+    if not allowed:
+        raise PermissionDenied("Self-service sign-up is turned off. Ask an administrator.")
+    limiter.hit(request.client.host if request.client else "unknown")
+    identity = await register(gateway, body.email, body.password, body.display_name.strip())
+    if identity is None:
+        return RegistrationOut(status="confirmation_required")
+    principal, memberships = await sign_in(sessions, identity)
+    return RegistrationOut(
+        status="signed_in",
+        session=_start_session(request, response, store, secure, principal, memberships),
     )
-    return _session_out(web.csrf, principal, memberships)
 
 
 @router.get("/auth/session", tags=["auth"])

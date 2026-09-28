@@ -3,14 +3,24 @@
 from fastapi import APIRouter, Response, status
 
 from praxima.entrypoints.http.deps import (
+    CurrentUser,
     OrganizationAccess,
+    SelfSignup,
     UserSession,
     WorkspaceAccess,
     narrow_to_workspace,
 )
 from praxima.entrypoints.http.responses import Page, PageInfo
 from praxima.modules import catalog, engagement, iam, tenancy
-from praxima.modules.tenancy.api.schemas import PackOut, WorkspaceIn, WorkspaceOut, WorkspacePatch
+from praxima.modules.tenancy.api.schemas import (
+    OrganizationIn,
+    OrganizationOut,
+    PackOut,
+    WorkspaceIn,
+    WorkspaceOut,
+    WorkspacePatch,
+)
+from praxima.shared.errors import PermissionDenied
 
 router = APIRouter(tags=["workspaces"])
 
@@ -62,3 +72,21 @@ async def create_workspace(
     await engagement.install_work_item_kinds(scoped.session, scoped.actor, workspace_id)
     response.headers["Location"] = f"/api/v1/workspaces/{workspace_id}"
     return WorkspaceOut.of(await tenancy.get_workspace(scoped.session, workspace_id))
+
+
+@router.post("/organizations", status_code=status.HTTP_201_CREATED)
+async def create_own_organization(
+    body: OrganizationIn,
+    user: CurrentUser,
+    session: UserSession,
+    allowed: SelfSignup,
+    response: Response,
+) -> OrganizationOut:
+    """Self-service sign-up: create your first organization and become its owner."""
+    if not allowed:
+        raise PermissionDenied("Self-service sign-up is turned off. Ask an administrator.")
+    organization_id = await tenancy.create_own_organization(
+        session, user.user_id, slug=body.slug, name=body.name.strip()
+    )
+    response.headers["Location"] = f"/api/v1/organizations/{organization_id}"
+    return OrganizationOut(id=organization_id, slug=body.slug, name=body.name.strip())
