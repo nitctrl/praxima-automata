@@ -33,6 +33,7 @@ pytestmark = pytest.mark.skipif(not URL, reason="Set PRAXIMA_TEST_DATABASE_URL t
 ROOT = Path(__file__).resolve().parents[1]
 TABLES = (
     "audit.audit_log, engagement.call_events, engagement.work_item_events, "
+    "releases.agent_releases, "
     "engagement.consents, engagement.tasks, engagement.work_items, "
     "engagement.work_item_kinds, engagement.conversations, engagement.contacts, "
     "knowledge.chunks, knowledge.document_sections, knowledge.faqs, "

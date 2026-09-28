@@ -9,7 +9,8 @@ can jump to the real code. `.env` and `.env.runtime` were **not** read while wri
 only the code that loads them was.
 
 > **Last updated 2026-09-27**, after restructure steps 1–3, 5a and 5b (backend) and the
-> `/api/v1` console (frontend). Step 4 (releases) has not started.
+> `/api/v1` console (frontend), plus step 4a (agent releases: build, preview, publish,
+> roll back). Step 4b, switching the voice agent to releases, is not started.
 
 ---
 
@@ -30,13 +31,17 @@ yet:
 | Generation | Status | Data | Who uses it |
 | --- | --- | --- | --- |
 | **A. Live voice path** (legacy) | Working; answers calls for the fictional "Clinic A" | Supabase `public.*` tables, one published JSON snapshot | Callers (via `src/agent.py`) and the legacy `/api/*` dashboard routes |
-| **B. New platform** | Steps 1–3 and 5 built and tested; not yet read by the voice agent | New PostgreSQL schemas (`iam`, `tenancy`, `catalog`, `knowledge`, `engagement`, …) managed by Alembic | Staff, through the REST API `/api/v1` and the Next.js console in `../frontend` |
+| **B. New platform** | Steps 1–3, 4a and 5 built and tested; not yet read by the voice agent | New PostgreSQL schemas (`iam`, `tenancy`, `catalog`, `knowledge`, `engagement`, …) managed by Alembic | Staff, through the REST API `/api/v1` and the Next.js console in `../frontend` |
 
-**Step 4 (releases)** is the bridge. It will build the agent's published snapshot from the
-new schema, and the voice agent will then read that instead of `public.configuration_versions`.
-It changes the AI's data source, so it waits for explicit approval. Until then the AI code
-is deliberately untouched, and `tests/test_architecture.py` proves the voice worker loads no
-platform code.
+**Step 4 (releases)** is the bridge.
+- **Step 4a (built):** the console publishes an agent's snapshot from the new schema
+  (section 9.9).
+- **Step 4b (not started):** the voice agent will read that published release instead of
+  `public.configuration_versions`. It changes the AI's data source, so it waits for explicit
+  approval.
+
+Until then the AI code is deliberately untouched, and `tests/test_architecture.py` proves the
+voice worker loads no platform code.
 
 Sections 4–8 describe **A** (still exactly how calls work). Sections 9–11 describe **B** and
 the console.
@@ -81,7 +86,7 @@ flowchart LR
     FE -- "/api/* same-origin proxy" --> API
     API -- "RLS-scoped SQLAlchemy" --> NEW
     API -. "index / search" .-> QK
-    NEW -. "step 4: releases (not built)" .-> W
+    NEW -. "published releases (step 4b: not read yet)" .-> W
 ```
 
 Key ideas:
@@ -433,7 +438,7 @@ never import the runtime, routers never touch the database, and domain code does
 | `catalog` | step 2 | entity types (JSON Schema from the pack), entities, relations, availability rules/exceptions |
 | `knowledge` | step 3 | documents, versions (review lifecycle), sections, chunks, FAQs, announcements (live updates) |
 | `engagement` | step 5 | contacts (encrypted), consents, conversations, call events, work item kinds, work items + history, tasks |
-| `releases` | **step 4, not built** | snapshot build → preview → publish → rollback for the voice agent |
+| `releases` | step 4a | immutable agent releases: snapshot build → preview → publish → rollback (not yet read by calls) |
 | `billing`, `ops` | schemas only | usage and rate cards later; outbox/idempotency/jobs |
 
 Migrations are `db/migrations/versions/0001_foundation.py` … `0006_self_serve_organizations.py`. They are
@@ -556,6 +561,36 @@ a draft → published → archived status.
   changes, and `call_events` is partitioned monthly.
 - **Conversations** are read-only in the API; the voice runtime will write them after step 4.
 
+### 9.9 Agent releases (step 4a)
+
+- **What a release is:** `releases.agent_releases` holds one immutable **snapshot** per
+  published version of an agent (schema version 4, model in `releases/domain/agent_snapshot.py`).
+- **What goes in:** only published, current content:
+  - the agent's messages and enabled tools
+  - workspace settings and pack
+  - published directory entries, links and hours; future date exceptions
+  - live document sections and valid approved answers
+  - current or scheduled live updates
+  - request types
+- **How it's assembled:** `releases.build_snapshot` gathers this through each module's public
+  selectors (`catalog.published_catalog`, `knowledge.published_knowledge`, …). It then
+  validates it with Pydantic and hashes the canonical JSON; that hash is the **digest**.
+- **Preview** (`POST …/releases/preview`) stores nothing. It returns:
+  - the digest
+  - counts
+  - what changed since the live version
+  - warnings: agent disabled, no phone number, nothing published
+- **Publish** (`POST …/releases {digest}`, manager+):
+  - It rebuilds and stores the release only if the digest still matches; if content changed
+    since the preview, it returns 409.
+  - The previous live version becomes `superseded`. A partial unique index keeps one live
+    release per agent.
+- **Rollback** (`{source_release_id}`) republishes an earlier snapshot as a new version.
+- **Immutability:** a trigger rejects any change except status moving forward. RLS has no
+  DELETE policy, so releases are never deleted.
+- **Link from calls:** `engagement.conversations.agent_release_id` now references the release
+  a call was pinned to.
+
 ### 9.8 Tests for the new platform
 
 DB tests run only when `PRAXIMA_TEST_DATABASE_URL` points to a **disposable** database
@@ -589,7 +624,7 @@ today:
 Consequences:
 - Calls **do not appear** in the console's Calls screen yet.
 - No request is created from a live call.
-- Content edited in the new console does not reach callers until step 4.
+- Content published in the new console, even as a release, does not reach callers until step 4b.
 
 ---
 

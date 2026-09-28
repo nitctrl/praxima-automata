@@ -108,3 +108,13 @@ def test_index_is_off_without_configuration(monkeypatch):
     assert QdrantKnowledgeIndex.from_environment() is None
     monkeypatch.setenv("QDRANT_URL", "ftp://nope")
     assert QdrantKnowledgeIndex.from_environment() is None
+
+
+def test_search_terms_drop_filler_and_stay_tsquery_safe():
+    from praxima.modules.knowledge.domain.search import search_terms, tsquery_text
+
+    assert search_terms("Are you open on Sunday?") == ["open", "sunday"]
+    assert search_terms("Dr. Sharma kab milte hain?") == ["sharma", "milte"]
+    assert search_terms("when do you") == []  # only filler: semantic search alone
+    assert search_terms("fees & (timings) | ecg:* 'x'") == ["fees", "timings", "ecg"]
+    assert tsquery_text(["open", "sunday"]) == "'open':* | 'sunday':*"

@@ -291,3 +291,147 @@ async def availability_of(
             for e in exceptions
         ],
     )
+
+
+@dataclass(frozen=True)
+class PublishedCatalog:
+    """Everything published in the directory, as plain JSON-ready data in a stable order.
+
+    Feeds agent release snapshots, so the same content must always serialize identically.
+    """
+
+    entity_types: list[dict[str, Any]]
+    entities: list[dict[str, Any]]
+    relations: list[dict[str, Any]]
+    rules: list[dict[str, Any]]
+    exceptions: list[dict[str, Any]]
+
+
+def _valid_now(column: Any, at: datetime) -> ColumnElement[bool]:
+    return or_(column.is_(None), column.op("@>")(at))
+
+
+def _time(value: time | None) -> str | None:
+    return value.isoformat(timespec="minutes") if value else None
+
+
+async def published_catalog(session: AsyncSession, at: datetime) -> PublishedCatalog:
+    """Published entities valid at `at`, their published links and hours (five queries).
+
+    Links, hours and exceptions are kept only when every entity they mention is published;
+    exceptions dated before `at` are dropped. Validity windows are applied here; the runtime
+    applies hours and exceptions against the call's own clock.
+    """
+    types = list(
+        await session.scalars(
+            select(EntityType)
+            .where(EntityType.status == "active", EntityType.deleted_at.is_(None))
+            .order_by(EntityType.key)
+        )
+    )
+    type_keys = {t.id: t.key for t in types}
+    entities = list(
+        await session.scalars(
+            select(Entity)
+            .where(
+                Entity.publication_status == "published",
+                Entity.deleted_at.is_(None),
+                Entity.entity_type_id.in_(type_keys),
+                _valid_now(Entity.valid_during, at),
+            )
+            .order_by(Entity.key, Entity.id)
+        )
+    )
+    live = {e.id for e in entities}
+
+    def known(*ids: uuid.UUID | None) -> bool:
+        return all(i is None or i in live for i in ids)
+
+    relations = await session.scalars(
+        select(EntityRelation)
+        .where(
+            EntityRelation.publication_status == "published",
+            EntityRelation.deleted_at.is_(None),
+            _valid_now(EntityRelation.valid_during, at),
+        )
+        .order_by(EntityRelation.relation_type, EntityRelation.id)
+    )
+    rules = await session.scalars(
+        select(AvailabilityRule)
+        .where(
+            AvailabilityRule.publication_status == "published",
+            AvailabilityRule.deleted_at.is_(None),
+            _valid_now(AvailabilityRule.valid_during, at),
+        )
+        .order_by(AvailabilityRule.id)
+    )
+    exceptions = await session.scalars(
+        select(AvailabilityException)
+        .where(
+            AvailabilityException.publication_status == "published",
+            AvailabilityException.deleted_at.is_(None),
+            AvailabilityException.exception_date >= at.date(),
+        )
+        .order_by(AvailabilityException.exception_date, AvailabilityException.id)
+    )
+    return PublishedCatalog(
+        entity_types=[
+            {
+                "key": t.key,
+                "name": t.name,
+                "schema_version": t.schema_version,
+                "searchable_fields": list(t.searchable_fields),
+            }
+            for t in types
+        ],
+        entities=[
+            {
+                "id": str(e.id),
+                "type": type_keys[e.entity_type_id],
+                "key": e.key,
+                "name": e.name,
+                "aliases": list(e.aliases),
+                "attributes": e.attributes,
+            }
+            for e in entities
+        ],
+        relations=[
+            {
+                "id": str(r.id),
+                "relation_type": r.relation_type,
+                "from_entity_id": str(r.from_entity_id),
+                "to_entity_id": str(r.to_entity_id),
+                "attributes": r.attributes or {},
+            }
+            for r in relations
+            if known(r.from_entity_id, r.to_entity_id)
+        ],
+        rules=[
+            {
+                "id": str(r.id),
+                "entity_id": str(r.entity_id) if r.entity_id else None,
+                "location_entity_id": str(r.location_entity_id) if r.location_entity_id else None,
+                "timezone": r.timezone,
+                "rrule": r.rrule,
+                "start_time": _time(r.start_time),
+                "end_time": _time(r.end_time),
+            }
+            for r in rules
+            if known(r.entity_id, r.location_entity_id)
+        ],
+        exceptions=[
+            {
+                "id": str(x.id),
+                "entity_id": str(x.entity_id) if x.entity_id else None,
+                "location_entity_id": str(x.location_entity_id) if x.location_entity_id else None,
+                "timezone": x.timezone,
+                "date": x.exception_date.isoformat(),
+                "is_available": x.is_available,
+                "start_time": _time(x.start_time),
+                "end_time": _time(x.end_time),
+                "public_message": x.public_message,
+            }
+            for x in exceptions
+            if known(x.entity_id, x.location_entity_id)
+        ],
+    )

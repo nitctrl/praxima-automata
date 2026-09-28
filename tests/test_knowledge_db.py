@@ -210,6 +210,11 @@ def test_search_is_hybrid_live_only_and_tenant_scoped(admin_id):
             assert [
                 h.heading for h in await knowledge.search_knowledge(session, ws_a, "sundays")
             ] == ["Timings"]
+            # Caller-style questions: filler words don't have to appear, plurals match.
+            for question in ("Are you open on Sunday?", "Is the clinic closed on sunday"):
+                hits = await knowledge.search_knowledge(session, ws_a, question)
+                assert hits and hits[0].heading == "Timings", question
+            assert await knowledge.search_knowledge(session, ws_a, "when do you") == []
             assert await knowledge.search_knowledge(session, ws_a, "secret draft") == []
             # Even if the vector store returned another tenant's chunk, it is dropped.
             index.semantic = [chunk_of[other]]

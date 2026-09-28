@@ -115,6 +115,7 @@ class Conversation(IdMixin, TenantMixin, Base):
         _fk(["agent_id"], "agents.agents"),
         _fk(["phone_number_id"], "agents.phone_numbers"),
         _fk(["contact_id"], f"{SCHEMA}.contacts"),
+        _fk(["agent_release_id"], "releases.agent_releases"),
         Index(None, "workspace_id", "started_at"),
         Index(
             "ix_conversations_needing_review",
@@ -135,7 +136,7 @@ class Conversation(IdMixin, TenantMixin, Base):
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(WORKSPACES))
     agent_id: Mapped[uuid.UUID]
-    agent_release_id: Mapped[uuid.UUID | None]  # FK added with the releases module (step 4)
+    agent_release_id: Mapped[uuid.UUID | None]  # the release this call was pinned to
     phone_number_id: Mapped[uuid.UUID | None]
     contact_id: Mapped[uuid.UUID | None]
     channel: Mapped[str] = mapped_column(Text, default="voice", server_default=sql_text("'voice'"))

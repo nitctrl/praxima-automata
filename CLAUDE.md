@@ -482,8 +482,8 @@ POST-for-everything) migrate to this. Change the backend and
 | POST | `/workspaces/{wsId}/documents/{id}/versions` | ✅ upload a new version (goes to review) |
 | GET, PATCH / PUT | `…/documents/{id}/versions/{versionId}[/sections]` | ✅ review (PUT sections, only while under review); PATCH `status` = published / rejected / archived |
 | GET | `/workspaces/{wsId}/knowledge/search?q=` | ✅ keyword + Qdrant (when configured) search of published documents |
-| POST | `/workspaces/{wsId}/agents/{agentId}/releases/preview` | snapshot + digest |
-| GET, POST | `/workspaces/{wsId}/agents/{agentId}/releases` | list / publish previewed digest; rollback = publish `{source}` |
+| POST | `/workspaces/{wsId}/agents/{agentId}/releases/preview` | ✅ builds the snapshot from published content (stores nothing): digest, counts, changes vs live, warnings |
+| GET, POST / GET | `/workspaces/{wsId}/agents/{agentId}/releases[/{id}]` | ✅ history / publish `{digest}` (409 if content changed since preview) or roll back `{source_release_id}` (manager+) / one release with its snapshot |
 | GET, POST / GET, PATCH | `/workspaces/{wsId}/work-items[/{id}]` | ✅ `?kind=&stage=&open=&assignee_user_id=&entity_id=`; POST takes `Idempotency-Key`; PATCH is either `{stage}` or payload / staff note / due time, with `row_version`; no personal data in responses |
 | PUT | `/workspaces/{wsId}/work-items/{id}/assignee` | ✅ assign to a workspace member or `null` (manager+) |
 | POST / DELETE | `/workspaces/{wsId}/work-items/{id}/reveal`, `…/personal-details` | ✅ decrypt (staff+, audited; stays POST) / erase (admin+) |
@@ -497,7 +497,7 @@ POST-for-everything) migrate to this. Change the backend and
 | PUT, DELETE | `/workspaces/{wsId}/memberships/{userId}`, `/organizations/{orgId}/memberships/{userId}` | ✅ grant / revoke a role (admin+; never above your own role) |
 | GET | `/health` (liveness), `/ready` (DB + critical deps) | unauthenticated, no data |
 
-✅ = implemented (steps 1b, 2b, 3b and 5b). CRM endpoints that touch personal data need
+✅ = implemented (steps 1b, 2b, 3b, 5b and 4a). CRM endpoints that touch personal data need
 the `Vault` (`CLINIC_PII_KEYS`, `CLINIC_PII_KEY_VERSION`, `PRAXIMA_LOOKUP_KEY`) and answer
 503 without it. Protected endpoints take `CurrentUser`, `UserSession` or
 `WorkspaceAccess` / `OrganizationAccess` from `entrypoints/http/deps.py`. These resolve the

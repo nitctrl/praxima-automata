@@ -31,6 +31,8 @@ PERMISSIONS = {
     "crm:assign": "manager",
     "pii:reveal": "staff",
     "pii:erase": "admin",
+    "releases:read": "viewer",
+    "releases:publish": "manager",
 }
 
 

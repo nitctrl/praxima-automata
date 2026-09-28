@@ -1495,3 +1495,29 @@ endpoints in `CLAUDE.md` §6). Creating a workspace now installs its work item k
   organization and grants its owner membership through `iam.set_membership`, both audited.
 - **Tests:** `tests/test_api_v1_registration_db.py` checks the policy directly with forced
   RLS: not for someone else, and not a second one.
+
+## 21. Implemented (revision 0007: agent releases, step 4a)
+
+- **Table:** `releases.agent_releases` as designed in §5/§10, with forced RLS on
+  `app.workspace_id` and composite tenant FKs to `agents.agents` and to itself
+  (`source_release_id`, for rollbacks).
+- **One live release per agent:** partial unique index `uq_agent_releases_one_published`.
+  `(agent_id, version_no)` is unique.
+- **Immutability:** the trigger `releases.guard_agent_release` rejects any change except
+  status moving forward (published → superseded | archived, superseded → archived). There is
+  no DELETE policy, so under RLS a delete matches nothing; the trigger also rejects deletes by
+  the owner.
+- **Snapshot:** schema version 4 (Pydantic model `releases/domain/agent_snapshot.py`), built
+  only from published, current content. Digest = `sha256:` + SHA-256 of the canonical JSON.
+- **Deviations from §10:**
+  - The `release` block (id, version, digest, published_at) is not stored inside `snapshot`;
+    those values are columns, so the digest covers exactly the content.
+  - A `summary` jsonb (item counts per section) is stored so history lists never load
+    snapshots.
+  - Validation is in Pydantic only; there's no SQL-side build function yet.
+  - `policy` (prohibited topics, emergency triggers) is omitted until packs define
+    `policy.yaml`.
+- **Preview is stateless** (nothing stored). Publish rebuilds and stores only if the digest
+  still matches, and the live release is locked `FOR UPDATE` while publishing.
+- **Calls:** `engagement.conversations.agent_release_id` now has its composite FK to
+  `releases.agent_releases`.

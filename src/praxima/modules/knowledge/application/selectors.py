@@ -6,12 +6,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import ColumnElement, and_, func, literal_column, select
+from sqlalchemy import ColumnElement, and_, func, literal_column, or_, select
 from sqlalchemy import text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from praxima.modules.knowledge.application.ports import KnowledgeIndex
 from praxima.modules.knowledge.domain.chunking import reciprocal_rank_fusion
+from praxima.modules.knowledge.domain.search import search_terms, tsquery_text
 from praxima.modules.knowledge.infrastructure.models import (
     Announcement,
     Chunk,
@@ -313,17 +314,20 @@ async def search_knowledge(
     Qdrant results are only candidates: they are re-checked against live, RLS-visible
     chunks here, so the vector store can never widen what a workspace sees.
     """
-    tsquery = func.plainto_tsquery(sql_text("'simple'::regconfig"), query)
-    keyword = list(
-        await session.scalars(
-            select(Chunk.id)
-            .join(Document, _live_chunks())
-            .where(_TSVECTOR.op("@@")(tsquery))
-            .order_by(func.ts_rank(_TSVECTOR, tsquery).desc(), Chunk.id)
-            .limit(CANDIDATES)
+    rankings: list[list[uuid.UUID]] = []
+    if terms := search_terms(query):  # all filler ("when do you ...") → semantic only
+        tsquery = func.to_tsquery(sql_text("'simple'::regconfig"), tsquery_text(terms))
+        rankings.append(
+            list(
+                await session.scalars(
+                    select(Chunk.id)
+                    .join(Document, _live_chunks())
+                    .where(_TSVECTOR.op("@@")(tsquery))
+                    .order_by(func.ts_rank(_TSVECTOR, tsquery).desc(), Chunk.id)
+                    .limit(CANDIDATES)
+                )
+            )
         )
-    )
-    rankings = [keyword]
     if index is not None:
         try:
             rankings.append(await index.search(workspace_id, query, CANDIDATES))
@@ -345,3 +349,86 @@ async def search_knowledge(
         )
         for r in hits
     ]
+
+
+@dataclass(frozen=True)
+class PublishedKnowledge:
+    """Published knowledge as plain JSON-ready data in a stable order (for agent releases)."""
+
+    sections: list[dict[str, Any]]
+    faqs: list[dict[str, Any]]
+    announcements: list[dict[str, Any]]
+
+
+async def published_knowledge(session: AsyncSession, at: datetime) -> PublishedKnowledge:
+    """Live document sections, approved answers valid at `at`, and live updates not yet over.
+
+    Announcements keep their [start, end) window: scheduled ones are included so the runtime
+    can apply them against the call's own clock.
+    """
+    sections = (
+        await session.execute(
+            select(DocumentSection, Document.title, Document.category)
+            .join(Document, Document.published_version_id == DocumentSection.document_version_id)
+            .where(Document.status == "active", Document.deleted_at.is_(None))
+            .order_by(Document.title, Document.id, DocumentSection.position)
+        )
+    ).all()
+    faqs = await session.scalars(
+        select(Faq)
+        .where(
+            Faq.publication_status == "published",
+            Faq.deleted_at.is_(None),
+            or_(Faq.valid_during.is_(None), Faq.valid_during.op("@>")(at)),
+        )
+        .order_by(Faq.canonical_question, Faq.id)
+    )
+    announcements = await session.scalars(
+        select(Announcement)
+        .where(
+            Announcement.publication_status == "published",
+            Announcement.deleted_at.is_(None),
+            func.upper(Announcement.valid_during) > at,
+        )
+        .order_by(func.lower(Announcement.valid_during), Announcement.id)
+    )
+    return PublishedKnowledge(
+        sections=[
+            {
+                "id": str(row.DocumentSection.id),
+                "document_title": row.title,
+                "category": row.category,
+                "heading": row.DocumentSection.heading,
+                "text": row.DocumentSection.text,
+                "entity_id": str(row.DocumentSection.entity_id)
+                if row.DocumentSection.entity_id
+                else None,
+                "keywords": list(row.DocumentSection.keywords),
+            }
+            for row in sections
+        ],
+        faqs=[
+            {
+                "id": str(f.id),
+                "question": f.canonical_question,
+                "phrasings": list(f.alternative_phrasings),
+                "answer": f.approved_answer,
+                "category": f.category,
+                "entity_id": str(f.entity_id) if f.entity_id else None,
+            }
+            for f in faqs
+        ],
+        announcements=[
+            {
+                "id": str(a.id),
+                "kind": a.kind,
+                "message": a.public_message,
+                "entity_id": str(a.entity_id) if a.entity_id else None,
+                "location_entity_id": str(a.location_entity_id) if a.location_entity_id else None,
+                "priority": a.priority,
+                "starts_at": a.valid_during.lower.isoformat() if a.valid_during.lower else None,
+                "ends_at": a.valid_during.upper.isoformat() if a.valid_during.upper else None,
+            }
+            for a in announcements
+        ],
+    )
