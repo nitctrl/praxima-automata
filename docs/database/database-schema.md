@@ -1521,3 +1521,21 @@ endpoints in `CLAUDE.md` §6). Creating a workspace now installs its work item k
   still matches, and the live release is locked `FOR UPDATE` while publishing.
 - **Calls:** `engagement.conversations.agent_release_id` now has its composite FK to
   `releases.agent_releases`.
+
+## 22. Implemented (revision 0008: voice release lookup, step 4b)
+
+- **Function:** `releases.live_release_for_number(p_called_number text) RETURNS jsonb`,
+  `SECURITY DEFINER`, `search_path = ''`. EXECUTE is revoked from PUBLIC; grant it to the
+  voice worker's login with `scripts/voice_runtime.py grant <role>`.
+- **What it does:**
+  1. Validates E.164 and sets `app.called_number`, so the `phone_numbers_ingress` policy
+     exposes only that active number.
+  2. Resolves the agent and workspace, and sets `app.workspace_id`, so forced RLS still
+     applies.
+  3. Returns `{release_id, version_no, workspace_id, agent_id, snapshot}` for an active agent
+     with a published release.
+  4. Otherwise returns `{reason: invalid_number | unknown_number | agent_disabled |
+     no_live_release}`.
+- **Usage:** the runtime makes one call per call start, in a read-only transaction, and reads
+  no tables directly. This is §10's "one indexed read", with the tenant from trusted ingress
+  only.

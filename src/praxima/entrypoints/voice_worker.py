@@ -26,6 +26,7 @@ from livekit.agents.voice import Agent, AgentSession
 from livekit.plugins import google, noise_cancellation, sarvam, silero
 
 from praxima.runtime.tools.agent_knowledge import AgentKnowledge, load_agent_knowledge
+from praxima.runtime.release.knowledge import load_release_knowledge
 from praxima.dev.sip_test import ingress as clinic_ingress
 
 # ── Turn detector: optional ─────────────────────────────────────────
@@ -98,8 +99,13 @@ class VoiceAgent(Agent):
 
     async def on_enter(self):
         """Agent speaks first when the caller is connected."""
+        # A release carries the agent's published greeting: say it word for word.
+        greeting = getattr(self.clinic_knowledge, "greeting", None)
+        if greeting:
+            self.session.say(greeting)
+            return
         self.session.generate_reply(
-            instructions=(
+            instructions=getattr(self.clinic_knowledge, "greeting_instruction", None) or (
                 "Greet the caller warmly in one short sentence and ask how "
                 "you can help with this fictional test clinic. "
                 "Use Hindi unless the caller speaks English."
@@ -159,18 +165,33 @@ async def entrypoint(ctx: JobContext):
 
     # Knowledge-only integration: no clinic call orchestration, usage writes or custom speech.
     # Console uses the same single-clinic knowledge. Never expose it on another SIP route.
-    authorized = not telephony
-    if telephony:
-        try:
-            clinic_ingress(participant.kind, participant.attributes)
-            authorized = True
-        except LookupError:
-            pass
-    clinic_knowledge = (
-        await load_agent_knowledge(Path(__file__).resolve().parents[3])
-        if authorized else AgentKnowledge(None)
-    )
-    logger.info("Clinic knowledge %s", "loaded" if clinic_knowledge.snapshot else "unavailable")
+    if os.environ.get("PRAXIMA_VOICE_SOURCE", "legacy").strip().lower() == "release":
+        # The tenant comes from trusted ingress only: the number dialled, as LiveKit's own SIP
+        # layer reports it (never caller ID or speech). Bridged calls carry no trusted called
+        # number. Console tests stand in for a call to PRAXIMA_CONSOLE_NUMBER.
+        if participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+            called = participant.attributes.get("sip.trunkPhoneNumber", "")
+        elif not telephony:
+            called = os.environ.get("PRAXIMA_CONSOLE_NUMBER", "")
+        else:
+            called = ""
+        clinic_knowledge = await load_release_knowledge(called)
+        logger.info("Agent release %s", clinic_knowledge.describe())
+    else:
+        authorized = not telephony
+        if telephony:
+            try:
+                clinic_ingress(participant.kind, participant.attributes)
+                authorized = True
+            except LookupError:
+                pass
+        clinic_knowledge = (
+            await load_agent_knowledge(Path(__file__).resolve().parents[3])
+            if authorized else AgentKnowledge(None)
+        )
+        logger.info(
+            "Clinic knowledge %s", "loaded" if clinic_knowledge.snapshot else "unavailable"
+        )
 
     # ── Start with fully-configured Agent ──────────────────────────
     try:

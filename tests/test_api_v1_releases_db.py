@@ -177,3 +177,48 @@ def test_roles_isolation_and_immutability(api):
 
     asyncio.run(tamper())
     assert browser.get(f"{path}/{release['id']}").json()["release"]["status"] == "published"
+
+
+def test_voice_runtime_loads_the_live_release_for_the_called_number(api, monkeypatch):
+    """The worker's path: trusted called number → agent → live release (one function call)."""
+    from praxima.runtime.release.loader import LoadedRelease, NoRelease, load_release
+
+    monkeypatch.setenv("PRAXIMA_RUNTIME_DATABASE_URL", URL)
+    app, engine, browser, headers, _, ws = setup(api)
+    base = f"/api/v1/workspaces/{ws}"
+    agent = browser.post(
+        f"{base}/agents", json={"name": "Desk", "slug": "desk", **MESSAGES}, headers=headers
+    ).json()
+    content(browser, headers, base)
+    number = "+912212345678"
+    routed = browser.post(
+        f"{base}/agents/{agent['id']}/phone-numbers",
+        json={"phone_number": number, "provider": "plivo"},
+        headers=headers,
+    ).json()
+
+    assert asyncio.run(load_release(number)) == NoRelease("no_live_release")
+    path = f"{base}/agents/{agent['id']}/releases"
+    digest = browser.post(f"{path}/preview", headers=headers).json()["digest"]
+    browser.post(path, json={"digest": digest}, headers=headers)
+
+    loaded = asyncio.run(load_release(number))
+    assert isinstance(loaded, LoadedRelease) and loaded.version_no == 1
+    assert str(loaded.agent_id) == agent["id"] and str(loaded.workspace_id) == ws
+    assert [e.name for e in loaded.snapshot.entities] == ["Dr Live"]
+    assert loaded.snapshot.agent.greeting == MESSAGES["greeting_message"]
+
+    assert asyncio.run(load_release("+919000000000")) == NoRelease("unknown_number")
+    assert asyncio.run(load_release("98765")) == NoRelease("invalid_number")
+    row_version = browser.get(f"{base}/agents/{agent['id']}").json()["row_version"]
+    browser.patch(
+        f"{base}/agents/{agent['id']}",
+        json={"row_version": row_version, "status": "disabled"},
+        headers=headers,
+    )
+    assert asyncio.run(load_release(number)) == NoRelease("agent_disabled")
+    browser.delete(f"{base}/agents/{agent['id']}/phone-numbers/{routed['id']}", headers=headers)
+    assert asyncio.run(load_release(number)) == NoRelease("unknown_number")
+
+    monkeypatch.setenv("PRAXIMA_RUNTIME_DATABASE_URL", "postgresql://nobody@127.0.0.1:1/x")
+    assert asyncio.run(load_release(number)) == NoRelease("database_unavailable")

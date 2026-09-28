@@ -10,7 +10,8 @@ only the code that loads them was.
 
 > **Last updated 2026-09-27**, after restructure steps 1–3, 5a and 5b (backend) and the
 > `/api/v1` console (frontend), plus step 4a (agent releases: build, preview, publish,
-> roll back). Step 4b, switching the voice agent to releases, is not started.
+> roll back) and step 4b (the voice agent can answer from releases, behind
+> `PRAXIMA_VOICE_SOURCE=release`; the default is still the legacy snapshot).
 
 ---
 
@@ -36,12 +37,13 @@ yet:
 **Step 4 (releases)** is the bridge.
 - **Step 4a (built):** the console publishes an agent's snapshot from the new schema
   (section 9.9).
-- **Step 4b (not started):** the voice agent will read that published release instead of
-  `public.configuration_versions`. It changes the AI's data source, so it waits for explicit
-  approval.
+- **Step 4b (built, opt-in):** with `PRAXIMA_VOICE_SOURCE=release` the voice agent answers from
+  that published release instead of `public.configuration_versions` (section 9.10). The
+  default is still `legacy`, so switching back is one setting.
+- **Step 4c (next):** calls and requests written back (Calls, Inbox).
 
-Until then the AI code is deliberately untouched, and `tests/test_architecture.py` proves the
-voice worker loads no platform code.
+The voice worker still loads no platform code (`tests/test_architecture.py` proves it): it reads
+the release through one database function and holds it in memory for the call.
 
 Sections 4–8 describe **A** (still exactly how calls work). Sections 9–11 describe **B** and
 the console.
@@ -86,7 +88,7 @@ flowchart LR
     FE -- "/api/* same-origin proxy" --> API
     API -- "RLS-scoped SQLAlchemy" --> NEW
     API -. "index / search" .-> QK
-    NEW -. "published releases (step 4b: not read yet)" .-> W
+    NEW -. "live release per call (PRAXIMA_VOICE_SOURCE=release)" .-> W
 ```
 
 Key ideas:
@@ -438,7 +440,7 @@ never import the runtime, routers never touch the database, and domain code does
 | `catalog` | step 2 | entity types (JSON Schema from the pack), entities, relations, availability rules/exceptions |
 | `knowledge` | step 3 | documents, versions (review lifecycle), sections, chunks, FAQs, announcements (live updates) |
 | `engagement` | step 5 | contacts (encrypted), consents, conversations, call events, work item kinds, work items + history, tasks |
-| `releases` | step 4a | immutable agent releases: snapshot build → preview → publish → rollback (not yet read by calls) |
+| `releases` | step 4a | immutable agent releases: snapshot build → preview → publish → rollback (read by calls in release mode) |
 | `billing`, `ops` | schemas only | usage and rate cards later; outbox/idempotency/jobs |
 
 Migrations are `db/migrations/versions/0001_foundation.py` … `0006_self_serve_organizations.py`. They are
@@ -591,6 +593,38 @@ a draft → published → archived status.
 - **Link from calls:** `engagement.conversations.agent_release_id` now references the release
   a call was pinned to.
 
+### 9.10 The voice agent on releases (step 4b)
+
+Switched by `PRAXIMA_VOICE_SOURCE=release` (default `legacy`). In `voice_worker.py`, the audio
+pipeline (STT, LLM, TTS, VAD, turn detection, endpointing) is unchanged. At call start:
+
+1. **The trusted called number.** It's `sip.trunkPhoneNumber` from a native LiveKit SIP
+   participant; bridged calls have none, and console mode uses `PRAXIMA_CONSOLE_NUMBER`.
+2. **One lookup.** `runtime/release/loader.py` calls `releases.live_release_for_number` with
+   one read-only query. The function comes from migration 0008 and runs as SECURITY DEFINER:
+   - It sets `app.called_number`, so the phone-number RLS policy exposes just that number.
+   - It resolves the agent, sets `app.workspace_id`, and returns the live snapshot.
+   - Otherwise it returns a reason: `unknown_number`, `agent_disabled` or `no_live_release`.
+   - It's reached with `PRAXIMA_RUNTIME_DATABASE_URL`, a login that may run only this
+     function (`scripts/voice_runtime.py`).
+3. **Pinning.** The snapshot is validated (schema 4 only) and pinned to the call in memory.
+   `runtime/release/knowledge.py` exposes only the tools the release enables:
+   - `find_entities`
+   - `get_entity`: details, links and fees
+   - `get_availability`: weekly hours for a date with exceptions applied, in the workspace
+     timezone
+   - `search_knowledge`: sections, approved answers and live updates
+   - `get_announcements`
+
+   The answers are computed in `runtime/release/lookup.py`, as pure functions.
+4. **Prompt and greeting.** The prompt is `packs/clinic/prompts/release_system_prompt.j2`,
+   with the same safety rules plus tool guidance. The agent's published greeting is spoken word
+   for word.
+
+**Failures:** with no release, number or database, the agent says published information is
+unavailable, and the worker logs `Agent release unavailable (<reason>)`. Writing
+conversations and requests is step 4c.
+
 ### 9.8 Tests for the new platform
 
 DB tests run only when `PRAXIMA_TEST_DATABASE_URL` points to a **disposable** database
@@ -624,7 +658,8 @@ today:
 Consequences:
 - Calls **do not appear** in the console's Calls screen yet.
 - No request is created from a live call.
-- Content published in the new console, even as a release, does not reach callers until step 4b.
+- Content published in the new console reaches callers only as a **published release**, and
+  only when the worker runs with `PRAXIMA_VOICE_SOURCE=release`.
 
 ---
 
