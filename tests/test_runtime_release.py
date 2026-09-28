@@ -223,3 +223,79 @@ def test_loader_refuses_anything_but_a_valid_v4_release():
     good = interpret(old | {"snapshot": RAW, "version_no": 3})
     assert isinstance(good, LoadedRelease) and good.version_no == 3
     assert good.snapshot.agent.greeting.startswith("Namaste")
+
+
+KINDS = [
+    {
+        "key": "appointment_request",
+        "name": "Appointment request",
+        "schema_version": 1,
+        "payload_schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "preferred_date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+                "is_new_patient": {"type": "boolean"},
+            },
+        },
+        "stages": ["new", "closed"],
+        "initial_stage": "new",
+        "terminal_stages": ["closed"],
+        "subject_types": ["doctor", "service"],
+    },
+    {
+        "key": "callback_request",
+        "name": "Callback request",
+        "schema_version": 1,
+        "payload_schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"reason_category": {"enum": ["fees", "other_admin"]}},
+        },
+        "stages": ["new", "closed"],
+        "initial_stage": "new",
+        "terminal_stages": ["closed"],
+        "subject_types": [],
+    },
+]
+WITH_REQUESTS = AgentSnapshot.model_validate(RAW | {"work_item_kinds": KINDS})
+
+
+def test_requests_are_checked_before_they_are_stored():
+    ok = lookup.prepare_request(
+        WITH_REQUESTS,
+        "appointment_request",
+        {"preferred_date": "2026-10-20"},
+        "Dr Sharma",
+        "+919812345678",
+    )
+    assert ok == {"status": "ok", "payload": {"preferred_date": "2026-10-20"}, "entity_id": "d1"}
+    unknown = lookup.prepare_request(WITH_REQUESTS, "pizza", {})
+    assert unknown["status"] == "invalid" and unknown["types"] == [
+        "appointment_request",
+        "callback_request",
+    ]
+    bad_field = lookup.prepare_request(
+        WITH_REQUESTS, "appointment_request", {"notes": "chest pain"}
+    )
+    assert bad_field["status"] == "invalid" and "details.notes" in bad_field["fix"]
+    assert "chest pain" not in str(bad_field)  # never echoes what the caller said
+    wrong_subject = lookup.prepare_request(WITH_REQUESTS, "callback_request", {}, "Dr Sharma")
+    assert set(wrong_subject["fix"]) == {"about"}
+    bad_number = lookup.prepare_request(WITH_REQUESTS, "callback_request", {}, "", "98123 45678")
+    assert set(bad_number["fix"]) == {"callback_number"}
+    only_callbacks = lookup.prepare_request(
+        WITH_REQUESTS, "appointment_request", {}, allowed={"callback_request"}
+    )
+    assert only_callbacks["types"] == ["callback_request"]
+
+
+def test_prompt_lists_request_types_only_when_allowed():
+    none = render_release_prompt(WITH_REQUESTS, NOW)
+    assert "create_request" not in none  # neither request tool is enabled in RAW
+    callbacks = AgentSnapshot.model_validate(
+        RAW | {"work_item_kinds": KINDS, "tools": [{"key": "request_callback"}]}
+    )
+    prompt = render_release_prompt(callbacks, NOW)
+    assert "callback_request" in prompt and "appointment_request" not in prompt
+    assert "never a booking" in prompt and '"one_of": ["fees", "other_admin"]' in prompt

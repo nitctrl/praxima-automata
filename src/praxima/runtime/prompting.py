@@ -39,12 +39,21 @@ def render_release_prompt(snapshot: "AgentSnapshot", now: datetime | None = None
     """System prompt for a call pinned to an agent release (schema version 4)."""
     from collections import Counter
 
-    from praxima.runtime.release.lookup import live_update_lines
+    from praxima.runtime.release.lookup import live_update_lines, request_kinds
 
     local = (now or datetime.now(ZoneInfo(snapshot.workspace.timezone))).astimezone(
         ZoneInfo(snapshot.workspace.timezone)
     )
     counts = Counter(e.type.replace("_", " ") for e in snapshot.entities)
+    enabled = {t.key for t in snapshot.tools}
+    # "create_work_item" allows every request type; "request_callback" only callbacks.
+    requestable: set[str] | None = (
+        None
+        if "create_work_item" in enabled
+        else {"callback_request"}
+        if "request_callback" in enabled
+        else set()
+    )
     directory = ", ".join(
         f"{n} {kind}{'' if n == 1 else 's'}" for kind, n in sorted(counts.items())
     )
@@ -61,4 +70,5 @@ def render_release_prompt(snapshot: "AgentSnapshot", now: datetime | None = None
         supported_languages=snapshot.workspace.supported_languages,
         directory_summary=directory or "nothing published",
         live_updates=live_update_lines(snapshot, local),
+        request_types=request_kinds(snapshot, requestable) if requestable != set() else [],
     ).strip()

@@ -1539,3 +1539,24 @@ endpoints in `CLAUDE.md` §6). Creating a workspace now installs its work item k
 - **Usage:** the runtime makes one call per call start, in a read-only transaction, and reads
   no tables directly. This is §10's "one indexed read", with the tenant from trusted ingress
   only.
+
+## 23. Implemented (revision 0009: voice call records, step 4c)
+
+- **Functions:** four `SECURITY DEFINER` functions (`search_path = ''`, EXECUTE revoked from
+  PUBLIC), granted to the voice login by `scripts/voice_runtime.py`. Each sets
+  `app.workspace_id` to the call's workspace, so forced RLS applies:
+  - `engagement.runtime_start_conversation`:
+    - validates the provider and call id, and checks the release belongs to the agent
+    - links the routed phone number
+    - is idempotent on `(provider, provider_call_id)`
+  - `engagement.runtime_record_event`: appends `call_started | tool_called |
+    request_created | call_ended` events with a small, content-free JSON object.
+  - `engagement.runtime_finish_conversation`: moves an active conversation to `completed |
+    failed | abandoned`, with an intent and disposition.
+  - `engagement.runtime_create_work_item`:
+    - idempotent on `idempotency_key` (`voice:<conversation>:<kind>`)
+    - uses the latest active kind, and checks the subject entity's type
+    - stores ciphertext already encrypted by the runtime (with its key version)
+    - writes a `work_item_events` row with `actor_type = 'runtime'`
+- **Not stored:** transcripts, audio, or the caller's number on the conversation
+  (`caller_number_ciphertext` stays empty until there's a purpose and consent for it).

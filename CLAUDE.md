@@ -128,7 +128,7 @@ docker compose up -d qdrant               # optional semantic search (today)
 uv run alembic upgrade head               # apply new-schema revisions (DB_OWNER_DATABASE_URL)
 uv run python scripts/packs.py register    # register shipped domain packs (needed before creating workspaces)
 uv run python scripts/check_database.py   # diagnose the /api/v1 database connection (never prints secrets)
-uv run python scripts/voice_runtime.py {grant|check} <role>   # voice worker login: release lookup only
+uv run python scripts/voice_runtime.py {grant|check} <role>   # voice worker login: release lookup + call records only
 uv run alembic upgrade head --sql         # print the SQL only (review / squawk), no database
 uv run alembic revision --autogenerate --rev-id 0002 -m "iam and tenancy"   # draft; review it
 

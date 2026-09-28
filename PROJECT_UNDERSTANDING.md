@@ -40,7 +40,8 @@ yet:
 - **Step 4b (built, opt-in):** with `PRAXIMA_VOICE_SOURCE=release` the voice agent answers from
   that published release instead of `public.configuration_versions` (section 9.10). The
   default is still `legacy`, so switching back is one setting.
-- **Step 4c (next):** calls and requests written back (Calls, Inbox).
+- **Step 4c (built, same switch):** calls are recorded in **Calls**, and requests the caller
+  leaves land in the **Inbox** (section 9.11).
 
 The voice worker still loads no platform code (`tests/test_architecture.py` proves it): it reads
 the release through one database function and holds it in memory for the call.
@@ -561,7 +562,7 @@ a draft → published → archived status.
   - Without the keys, those endpoints answer 503.
 - **Append-only records:** consents, work item events and call events. A trigger rejects
   changes, and `call_events` is partitioned monthly.
-- **Conversations** are read-only in the API; the voice runtime will write them after step 4.
+- **Conversations** are read-only in the API; the voice runtime writes them (step 4c).
 
 ### 9.9 Agent releases (step 4a)
 
@@ -622,8 +623,36 @@ pipeline (STT, LLM, TTS, VAD, turn detection, endpointing) is unchanged. At call
    for word.
 
 **Failures:** with no release, number or database, the agent says published information is
-unavailable, and the worker logs `Agent release unavailable (<reason>)`. Writing
-conversations and requests is step 4c.
+unavailable, and the worker logs `Agent release unavailable (<reason>)`.
+
+### 9.11 Calls and requests from the voice agent (step 4c)
+
+Same switch (`PRAXIMA_VOICE_SOURCE=release`). All writes go through four SECURITY DEFINER
+functions (migration 0009), which the voice login may execute and nothing more:
+`runtime_start_conversation`, `runtime_record_event`, `runtime_finish_conversation` and
+`runtime_create_work_item`. Each sets `app.workspace_id` to the call's workspace, so RLS applies.
+
+**What gets recorded:**
+- **The conversation:** it's opened at call start, idempotent on the provider's call id, and
+  pinned to the release. It's closed at hang-up (LiveKit's shutdown callback) with a status,
+  an intent (the first request type, or "information") and a disposition (`request_created`,
+  `answered` or `no_action`). Console calls are marked as test calls.
+- **Events:** `call_started`, `tool_called` (which tool, and success or not), `request_created`
+  and `call_ended`. They're **content-free**: nothing the caller said is stored. There's no
+  transcript, and recording is off.
+
+**Requests:** the `create_request` tool is offered when the release enables `create_work_item`
+(every type), or `request_callback` (callbacks only).
+- The runtime checks the pack's field schema, the allowed subject (e.g. a doctor) and the
+  number format.
+- It encrypts the caller's name and callback number with the same `PiiCipher` as the console,
+  bound to workspace, record and field, so staff can **Reveal** them.
+- "Call me back on this number" uses the caller ID held by the runtime. The model never sees
+  it, and it's never used to decide who the caller is.
+- A request is idempotent per call and type. Its history shows "By the voice agent".
+
+**Failures:** if the database or keys are unavailable, the call goes on. Recording failures are
+logged by type, and a request the agent couldn't store makes it say the fallback message.
 
 ### 9.8 Tests for the new platform
 
@@ -656,8 +685,8 @@ today:
 | New platform (section 9) | CRM, catalog, knowledge, agents on the new schema | Used by `/api/v1` and the console; **not** by calls until step 4 |
 
 Consequences:
-- Calls **do not appear** in the console's Calls screen yet.
-- No request is created from a live call.
+- In legacy mode, calls don't appear in **Calls** and no requests are created. In release
+  mode (steps 4b and 4c) both are recorded.
 - Content published in the new console reaches callers only as a **published release**, and
   only when the worker runs with `PRAXIMA_VOICE_SOURCE=release`.
 

@@ -222,3 +222,102 @@ def test_voice_runtime_loads_the_live_release_for_the_called_number(api, monkeyp
 
     monkeypatch.setenv("PRAXIMA_RUNTIME_DATABASE_URL", "postgresql://nobody@127.0.0.1:1/x")
     assert asyncio.run(load_release(number)) == NoRelease("database_unavailable")
+
+
+def test_calls_and_requests_are_recorded_for_staff(api, monkeypatch):
+    """Step 4c: a call is recorded (content-free) and a request lands in the Inbox, encrypted."""
+    import base64
+    import json
+    import os
+
+    from praxima.modules.engagement import Vault
+    from praxima.runtime.release.knowledge import ReleaseKnowledge
+    from praxima.runtime.release.loader import load_release
+    from praxima.shared.security.lookup import PhoneLookup
+    from praxima.shared.security.privacy import PiiCipher
+
+    key = os.urandom(32)
+    monkeypatch.setenv("PRAXIMA_RUNTIME_DATABASE_URL", URL)
+    monkeypatch.setenv("CLINIC_PII_KEYS", json.dumps({"v1": base64.b64encode(key).decode()}))
+    monkeypatch.setenv("CLINIC_PII_KEY_VERSION", "v1")
+    app, engine, browser, headers, _, ws = setup(api)
+    app.state.vault = Vault(PiiCipher({"v1": key}, "v1"), PhoneLookup(os.urandom(32)))
+    base = f"/api/v1/workspaces/{ws}"
+    agent = browser.post(
+        f"{base}/agents", json={"name": "Desk", "slug": "desk", **MESSAGES}, headers=headers
+    ).json()
+    doctors = content(browser, headers, base)
+    number, caller = "+912212345678", "+919812345678"
+    browser.post(
+        f"{base}/agents/{agent['id']}/phone-numbers",
+        json={"phone_number": number, "provider": "plivo"},
+        headers=headers,
+    )
+    path = f"{base}/agents/{agent['id']}/releases"
+    digest = browser.post(f"{path}/preview", headers=headers).json()["digest"]
+    browser.post(path, json={"digest": digest}, headers=headers)
+    sip = {"sip.callID": "SCL_test123", "sip.phoneNumber": caller}
+
+    async def call() -> tuple[dict, dict, dict, str]:  # type: ignore[type-arg]
+        knowledge = ReleaseKnowledge(await load_release(number))
+        await knowledge.start_call(called_number=number, is_sip=True, attributes=sip)
+        await knowledge.find_entities("ENT specialist")
+        details = json.dumps({"preferred_date": "2026-10-20"})
+        first = await knowledge.create_request(
+            kind="appointment_request",
+            details_json=details,
+            about="Dr Live",
+            name="Ravi Kumar",
+            use_calling_number=True,
+        )
+        again = await knowledge.create_request(kind="appointment_request", details_json=details)
+        bad = await knowledge.create_request(
+            kind="appointment_request", details_json=json.dumps({"notes": "chest pain"})
+        )
+        await knowledge.finish_call()
+        # The same call starting again (a retry) reuses its record.
+        retry = ReleaseKnowledge(await load_release(number))
+        await retry.start_call(called_number=number, is_sip=True, attributes=sip)
+        assert knowledge.recorder and retry.recorder
+        return first, again, bad, str(retry.recorder.conversation_id)
+
+    first, again, bad, retried = asyncio.run(call())
+    assert first["status"] == "recorded" and again["status"] == "already_recorded"
+    assert bad["status"] == "invalid" and "chest pain" not in json.dumps(bad)
+
+    calls = browser.get(f"{base}/conversations").json()["data"]
+    assert len(calls) == 1 and calls[0]["id"] == retried
+    record = calls[0]
+    assert (
+        record["status"],
+        record["disposition"],
+        record["primary_intent"],
+        record["is_test"],
+    ) == (
+        "completed",
+        "request_created",
+        "appointment_request",
+        False,
+    )
+    timeline = browser.get(f"{base}/conversations/{record['id']}").json()["events"]
+    types = [e["event_type"] for e in timeline]
+    assert types[0] == "call_started" and "request_created" in types and "call_ended" in types
+    assert {"tool": "find_entities", "status": "success"} in [
+        e["sanitized_payload"] for e in timeline
+    ]
+    raw = json.dumps(timeline)
+    assert "Ravi" not in raw and caller not in raw and "chest" not in raw  # content-free
+
+    items = browser.get(f"{base}/work-items").json()["data"]
+    assert len(items) == 1
+    item = items[0]
+    assert (item["kind"], item["conversation_id"], item["entity_id"]) == (
+        "appointment_request",
+        record["id"],
+        doctors["live"],
+    )
+    assert item["has_personal_details"] and item["payload"] == {"preferred_date": "2026-10-20"}
+    detail = browser.get(f"{base}/work-items/{item['id']}").json()
+    assert [h["actor_type"] for h in detail["history"]] == ["runtime"]
+    revealed = browser.post(f"{base}/work-items/{item['id']}/reveal", headers=headers).json()
+    assert (revealed["subject_name"], revealed["callback_number"]) == ("Ravi Kumar", caller)

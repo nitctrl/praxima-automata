@@ -177,6 +177,13 @@ async def entrypoint(ctx: JobContext):
             called = ""
         clinic_knowledge = await load_release_knowledge(called)
         logger.info("Agent release %s", clinic_knowledge.describe())
+        # Record the call (content-free) and close the record when the caller hangs up.
+        await clinic_knowledge.start_call(
+            called_number=called,
+            is_sip=participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP,
+            attributes=participant.attributes,
+        )
+        ctx.add_shutdown_callback(clinic_knowledge.finish_call)
     else:
         authorized = not telephony
         if telephony:

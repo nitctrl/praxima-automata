@@ -300,3 +300,69 @@ def live_update_lines(snapshot: AgentSnapshot, now: datetime) -> list[str]:
         window = f"{update['starts_at']} to {update['ends_at']}"
         lines.append(f"{update['state'].title()}{about}: {text} [{window}]")
     return lines
+
+
+E164 = re.compile(r"^\+[1-9][0-9]{7,14}$")
+
+
+def request_kinds(snapshot: AgentSnapshot, allowed: set[str] | None = None) -> list[dict[str, Any]]:
+    """The request types the caller may leave, with the fields each one takes."""
+    kinds = []
+    for kind in snapshot.work_item_kinds:
+        if allowed is not None and kind.key not in allowed:
+            continue
+        fields = {
+            name: (
+                {"one_of": spec["enum"]}
+                if "enum" in spec
+                else {"type": spec.get("type", "string"), "pattern": spec.get("pattern")}
+            )
+            for name, spec in kind.payload_schema.get("properties", {}).items()
+        }
+        kinds.append(
+            {"kind": kind.key, "name": kind.name, "fields": fields, "about": kind.subject_types}
+        )
+    return kinds
+
+
+def prepare_request(
+    snapshot: AgentSnapshot,
+    kind: str,
+    details: dict[str, Any],
+    about: str = "",
+    callback_number: str = "",
+    allowed: set[str] | None = None,
+) -> dict[str, Any]:
+    """Check a request before it's stored: known kind, valid fields, allowed subject, number.
+
+    Returns {"status": "ok", "payload": …, "entity_id": …} or {"status": "invalid", …} with
+    what to fix (field names only, never values).
+    """
+    from praxima.shared.validation import schema_errors
+
+    spec = next((k for k in snapshot.work_item_kinds if k.key == kind), None)
+    if spec is None or (allowed is not None and kind not in allowed):
+        return {
+            "status": "invalid",
+            "problem": "unknown request type",
+            "types": [k["kind"] for k in request_kinds(snapshot, allowed)],
+        }
+    payload = {k: v for k, v in details.items() if v not in (None, "")}
+    errors = schema_errors(spec.payload_schema, payload, "details")
+    if errors:
+        return {"status": "invalid", "fix": {e.field: e.message for e in errors}}
+    entity_id = None
+    if about:
+        entity = resolve_entity(snapshot, about)
+        if entity is None or entity.type not in spec.subject_types:
+            return {
+                "status": "invalid",
+                "fix": {"about": f"Must name one {' or '.join(spec.subject_types) or 'nothing'}."},
+            }
+        entity_id = entity.id
+    if callback_number and not E164.fullmatch(callback_number):
+        return {
+            "status": "invalid",
+            "fix": {"callback_number": "Confirm the number with its country code, e.g. +9198…"},
+        }
+    return {"status": "ok", "payload": payload, "entity_id": entity_id}

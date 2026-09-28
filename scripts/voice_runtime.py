@@ -1,6 +1,9 @@
-"""Give the voice worker's database login exactly one right: looking up a call's live release.
+"""Give the voice worker's database login only the calls it needs, and nothing else.
 
-    uv run python scripts/voice_runtime.py grant <role>   # allow <role> to run the lookup
+It may look up a call's live release and record the call (conversation, content-free events,
+requests with already-encrypted personal details), all through SECURITY DEFINER functions.
+
+    uv run python scripts/voice_runtime.py grant <role>   # allow <role> those functions
     uv run python scripts/voice_runtime.py check <role>   # confirm it can do nothing else
 
 Create the login yourself first (as a database admin), e.g. in psql:
@@ -24,7 +27,14 @@ from praxima.shared.db.engine import create_engine
 from praxima.shared.db.settings import ConfigurationError
 
 ROOT = Path(__file__).resolve().parents[1]
-FUNCTION = "releases.live_release_for_number(text)"
+FUNCTIONS = (
+    "releases.live_release_for_number(text)",
+    "engagement.runtime_start_conversation(uuid, uuid, uuid, text, text, text, boolean)",
+    "engagement.runtime_record_event(uuid, uuid, text, text, jsonb)",
+    "engagement.runtime_finish_conversation(uuid, uuid, text, text, text, text)",
+    "engagement.runtime_create_work_item("
+    "uuid, uuid, uuid, text, text, jsonb, uuid, bytea, bytea, text)",
+)
 ROLE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 
 
@@ -46,14 +56,23 @@ async def run(command: str, role: str) -> int:
         async with engine.begin() as connection:
             if command == "grant":
                 # The role name is validated above; identifiers can't be bound parameters.
-                await connection.execute(text(f'GRANT USAGE ON SCHEMA releases TO "{role}"'))
-                await connection.execute(text(f'GRANT EXECUTE ON FUNCTION {FUNCTION} TO "{role}"'))
-                print(f"✓ {role} may look up live releases (and nothing else is granted).")
+                for schema in ("releases", "engagement"):
+                    await connection.execute(text(f'GRANT USAGE ON SCHEMA {schema} TO "{role}"'))
+                for function in FUNCTIONS:
+                    await connection.execute(
+                        text(f'GRANT EXECUTE ON FUNCTION {function} TO "{role}"')
+                    )
+                print(f"✓ {role} may look up releases and record calls (nothing else).")
                 return 0
-            can_lookup = await connection.scalar(
-                text("SELECT has_function_privilege(:role, :fn, 'EXECUTE')"),
-                {"role": role, "fn": FUNCTION},
-            )
+            missing = [
+                function
+                for function in FUNCTIONS
+                if not await connection.scalar(
+                    text("SELECT has_function_privilege(:role, :fn, 'EXECUTE')"),
+                    {"role": role, "fn": function},
+                )
+            ]
+            can_lookup = not missing
             tables = (
                 (
                     await connection.execute(
@@ -79,7 +98,10 @@ async def run(command: str, role: str) -> int:
         sys.exit(f"✗ Database error: {detail}")
     finally:
         await engine.dispose()
-    print(f"{'✓' if can_lookup else '✗'} can look up live releases")
+    print(
+        f"{'✓' if can_lookup else '✗'} can look up releases and record calls"
+        + (f" (missing: {', '.join(m.split('(')[0] for m in missing)})" if missing else "")
+    )
     print(f"{'✗' if tables else '✓'} table access: {', '.join(tables) or 'none'}")
     print(f"{'✗' if powerful else '✓'} superuser / bypasses RLS: {'yes' if powerful else 'no'}")
     return 0 if can_lookup and not tables and not powerful else 1
