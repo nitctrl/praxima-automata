@@ -9,7 +9,7 @@ import httpx
 import pytest
 from support.queries import count_queries
 from test_api_v1_db import ORIGIN, api, onboard, problem, sign_in  # noqa: F401
-from test_iam_tenancy_db import URL, admin_id, migrated  # noqa: F401
+from test_iam_tenancy_db import CLINIC, URL, admin_id, migrated  # noqa: F401
 
 pytestmark = pytest.mark.skipif(not URL, reason="Set PRAXIMA_TEST_DATABASE_URL to run.")
 
@@ -17,7 +17,7 @@ WORKSPACE = {
     "slug": "branch-2",
     "name": "Second branch",
     "pack_key": "clinic",
-    "pack_version": "1.0.0",
+    "pack_version": CLINIC.version,
     "timezone": "Asia/Kolkata",
     "default_language": "hi-IN",
     "supported_languages": ["hi-IN", "en-IN"],
@@ -42,6 +42,21 @@ def setup(api, slug: str = "one"):  # type: ignore[no-untyped-def]
     return app, engine, browser, headers, org, created.json()["id"]
 
 
+def test_workspace_pack_vocabulary(api):
+    app, _, browser, _, _, ws = setup(api)
+    pack = browser.get(f"/api/v1/workspaces/{ws}/pack").json()
+    assert (pack["key"], pack["version"], pack["callback_kind"]) == (
+        "clinic",
+        CLINIC.version,
+        "callback_request",
+    )
+    assert pack["entity_labels"]["doctor"] == {"name": "Doctor", "plural_name": "Doctors"}
+    assert "about" in pack["document_categories"] and "closure" in pack["announcement_kinds"]
+    assert "112" in pack["agent_defaults"]["emergency_message"]
+    _, _, other, _, _, _ = setup(api, "two")
+    problem(other.get(f"/api/v1/workspaces/{ws}/pack"), 404)
+
+
 def test_workspace_creation_installs_the_pack(api):
     app, _, browser, _, _, ws = setup(api)
     workspace = browser.get(f"/api/v1/workspaces/{ws}").json()
@@ -49,7 +64,7 @@ def test_workspace_creation_installs_the_pack(api):
     types = browser.get(f"/api/v1/workspaces/{ws}/entity-types").json()["data"]
     assert [t["key"] for t in types] == ["doctor", "location", "service"]
     assert browser.get("/api/v1/packs").json()["data"] == [
-        {"key": "clinic", "version": "1.0.0", "name": "Clinic", "industry": "healthcare"}
+        {"key": "clinic", "version": CLINIC.version, "name": "Clinic", "industry": "healthcare"}
     ]
 
 

@@ -270,11 +270,12 @@ data first, with code only through narrow extension points:
 
 ```
 packs/<pack_id>/
-├── manifest.yaml            # id, version, supported languages, entity types, work item kinds, tools
+├── manifest.yaml            # id, version, languages, entity types, work item kinds, tools,
+│                            # callback_kind, agent_defaults (starter wording)
 ├── entity_types/*.json      # JSON Schema per entity type (attributes, searchable fields, display)
 ├── work_items/*.json        # JSON Schema per work item kind (payload, stages)
 ├── policy.yaml              # prohibited topics, emergency triggers, refusal/fallback wording
-├── prompts/*.j2             # persona and system prompt templates (rendered with release data)
+├── prompts/*.j2             # release_system_prompt.j2 for calls (else packs/_template's)
 ├── tools.yaml               # which generic tools are enabled, with pack-specific descriptions
 ├── labels.yaml              # UI/voice vocabulary ("Doctor", "Property", …)
 ├── seeds/                   # fictional demo data for development and tests
@@ -463,6 +464,7 @@ POST-for-everything) migrate to this. Change the backend and
 | POST | `/organizations` | ✅ create your first organization and become its owner (self-service only; RLS allows one per person) |
 | GET | `/workspaces` | ✅ every workspace the signed-in user belongs to |
 | GET | `/packs` | ✅ pack versions available to new workspaces |
+| GET | `/workspaces/{wsId}/pack` | ✅ the installed pack's vocabulary: entry labels (singular/plural), document categories, live-update kinds, callback kind, starter agent wording |
 | POST | `/organizations/{orgId}/workspaces` | ✅ create a workspace and install its pack (admin+) |
 | GET | `/organizations/{orgId}/workspaces` | |
 | GET, PATCH | `/workspaces/{wsId}` | ✅ read (viewer+) / partial update with `row_version` (manager+) |

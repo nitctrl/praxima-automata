@@ -519,6 +519,16 @@ for RLS policies, triggers and partitions, and `alembic check` must show no drif
 - `entity_types/*.json`
 - `work_items/*.json`: payload schema, stages, initial and terminal stages, subject types
 
+Optional pack fields keep industry wording out of core code:
+- `plural_name` on entity types, e.g. "Properties"
+- `callback_kind`, the request type the generic `request_callback` tool creates
+- `agent_defaults`, starter greeting, emergency and fallback wording
+- `prompts/release_system_prompt.j2`, the voice prompt with the pack's own rules. Without it,
+  calls use the domain-neutral `packs/_template/prompts/release_system_prompt.j2`.
+
+The console reads all of this from `GET /workspaces/{id}/pack`. Clinic is at 1.1.0 (1.0.0
+workspaces keep working with fallbacks).
+
 `packs/loader.py` validates a pack and computes a checksum. Pack versions are registered in
 `tenancy.pack_versions`. Creating a workspace (`POST /organizations/{org}/workspaces`)
 **installs** its pack's entity types and work item kinds. The clinic pack
@@ -726,9 +736,9 @@ Consequences:
    `agents.phone_numbers`.
 5. **Console mode needs `.env.runtime`.** Without the restricted runtime credentials created by
    `provision-runtime`, the agent runs but answers "knowledge unavailable".
-6. **Pack vocabularies aren't exposed by the API yet** (document categories, announcement
-   kinds). The backend validates them; the console offers suggestions. Relation types are
-   exposed (`GET /relation-types`), so the console can create directory links.
+6. **All pack vocabulary is exposed:** labels, document categories, live-update kinds and
+   starter wording (`GET /workspaces/{id}/pack`), plus link types (`GET /relation-types`).
+   The console shows no clinic words for another pack.
 7. **`docs/product-architecture.md` is a Phase 0 design document.** For the current target,
    read `CLAUDE.md` and `docs/database/database-schema.md` (§16–§19 record what is built).
 

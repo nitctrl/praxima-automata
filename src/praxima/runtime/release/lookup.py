@@ -192,7 +192,7 @@ def get_availability(
         "timezone": snapshot.workspace.timezone,
         "today": today.isoformat(),
         "days": [_day_hours(snapshot, entity.id, d) for d in days],
-        "note": "Published working hours, not bookable slots. Staff confirm every appointment.",
+        "note": "Published working hours, not bookable slots. Staff confirm every booking request.",
     }
 
 

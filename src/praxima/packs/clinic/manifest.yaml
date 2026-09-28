@@ -1,7 +1,7 @@
 # Clinic domain pack. Data only: installing it into a workspace copies these definitions.
 # Bump `version` for any change; workspaces upgrade explicitly.
 key: clinic
-version: 1.0.0
+version: 1.1.0
 name: Clinic
 industry: healthcare
 languages: [hi-IN, en-IN]
@@ -38,6 +38,14 @@ announcement_kinds: [information, closure, no_walk_ins, doctor_unavailable, serv
 
 # Requests staff follow up (files in work_items/). Never confirmed bookings.
 work_item_kinds: [appointment_request, callback_request]
+# What the generic request_callback tool creates.
+callback_kind: callback_request
+
+# Starter wording for new agents (staff edit it before publishing).
+agent_defaults:
+  greeting_message: "Namaste! How can I help you today?"
+  emergency_message: "If this is a medical emergency, please hang up and call 112 now."
+  fallback_message: "I'm not able to help with that. A team member will call you back."
 
 # Generic voice tools this pack enables by default (keys from the runtime tool registry).
 tools:

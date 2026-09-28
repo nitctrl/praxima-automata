@@ -92,3 +92,28 @@ class OrganizationOut(BaseModel):
     id: uuid.UUID
     slug: str
     name: str
+
+
+class EntityLabelOut(BaseModel):
+    name: str
+    plural_name: str
+
+
+class AgentDefaultsOut(BaseModel):
+    greeting_message: str
+    emergency_message: str
+    fallback_message: str
+
+
+class PackDetailsOut(BaseModel):
+    """The workspace's domain pack vocabulary, so UIs never hard-code an industry."""
+
+    key: str
+    version: str
+    name: str
+    industry: str
+    entity_labels: dict[str, EntityLabelOut]
+    document_categories: list[str]
+    announcement_kinds: list[str]
+    callback_kind: str | None
+    agent_defaults: AgentDefaultsOut | None

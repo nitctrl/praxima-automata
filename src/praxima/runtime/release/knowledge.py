@@ -29,8 +29,6 @@ READ_TOOLS = (
     "search_knowledge",
     "get_announcements",
 )
-# The pack's generic "request_callback" tool allows only its callback request type.
-CALLBACK_KIND = "callback_request"
 _CALL_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
 UNAVAILABLE = (
     "Published information is unavailable right now. Do not invent any facts. Explain "
@@ -81,7 +79,8 @@ class ReleaseKnowledge:
         enabled = {t.key for t in self.snapshot.tools}
         if "create_work_item" in enabled:
             return None
-        return {CALLBACK_KIND} if "request_callback" in enabled else set()
+        callback = self.snapshot.pack.callback_kind  # the pack's callback request type
+        return {callback} if "request_callback" in enabled and callback else set()
 
     def describe(self) -> str:
         if self.loaded is None:
@@ -119,40 +118,59 @@ class ReleaseKnowledge:
             "search_knowledge": self.search_knowledge,
             "get_announcements": self.get_announcements,
         }
+        if self.snapshot.entity_types:
+            # Name this release's entry types (doctor, property …) instead of hard-coding them.
+            types = ", ".join(f"{t.key} ({t.name})" for t in self.snapshot.entity_types)
+            tools["find_entities"] = function_tool(
+                self._find_entities,
+                name="find_entities",
+                description=f"Find published directory entries. Entry types: {types}.",
+            )
         chosen = [tools[key] for key in READ_TOOLS if key in enabled]
         if self._request_kinds() != set():
             chosen.append(self.create_request)
         return chosen
 
-    @function_tool()
-    async def find_entities(self, query: str, entity_type: str = "") -> dict[str, Any]:
-        """Find published doctors, services or locations.
-
-        Args:
-            query: What the caller asked about, e.g. "heart specialist", "Sharma", "ECG".
-            entity_type: Optional: doctor, service or location.
-        """
+    def _lookup_entities(self, query: str, entity_type: str) -> dict[str, Any]:
         assert self.snapshot is not None
         return self._track(
             "find_entities", lookup.find_entities(self.snapshot, query, entity_type or None)
         )
 
+    async def _find_entities(self, query: str, entity_type: str = "") -> dict[str, Any]:
+        """
+        Args:
+            query: What the caller asked about, in their words.
+            entity_type: Optional entry type key, from the list in the description.
+        """
+        return self._lookup_entities(query, entity_type)
+
     @function_tool()
-    async def get_entity(self, name: str) -> dict[str, Any]:
-        """Details of one doctor, service or location, and what it is linked to (fees, places).
+    async def find_entities(self, query: str, entity_type: str = "") -> dict[str, Any]:
+        """Find published directory entries by name or details.
 
         Args:
-            name: The name as the caller said it, e.g. "Dr Sharma" or "ECG".
+            query: What the caller asked about, in their words.
+            entity_type: Optional entry type key, from the list in the description.
+        """
+        return self._lookup_entities(query, entity_type)
+
+    @function_tool()
+    async def get_entity(self, name: str) -> dict[str, Any]:
+        """Details of one directory entry, and what it is linked to (with fees or other details).
+
+        Args:
+            name: The name as the caller said it.
         """
         assert self.snapshot is not None
         return self._track("get_entity", lookup.get_entity(self.snapshot, name))
 
     @function_tool()
     async def get_availability(self, name: str, date: str = "") -> dict[str, Any]:
-        """Published hours of a doctor or location, with leave and holidays applied.
+        """Published hours of one directory entry, with leave and holidays applied.
 
         Args:
-            name: The doctor or location, as the caller said it.
+            name: The entry, as the caller said it.
             date: Optional date as YYYY-MM-DD in the business timezone; empty for the next 7 days.
         """
         assert self.snapshot is not None
@@ -175,7 +193,7 @@ class ReleaseKnowledge:
 
     @function_tool()
     async def get_announcements(self) -> dict[str, Any]:
-        """Live updates in force now or scheduled (closures, doctors on leave)."""
+        """Live updates in force now or scheduled (closures, someone on leave)."""
         assert self.snapshot is not None
         return self._track(
             "get_announcements", lookup.get_announcements(self.snapshot, self._now())
@@ -196,10 +214,10 @@ class ReleaseKnowledge:
         Confirm the details with the caller first, and ask before using their number.
 
         Args:
-            kind: The request type, e.g. appointment_request or callback_request.
+            kind: The request type key, from the request types in your instructions.
             details_json: The request type's fields as a JSON object, e.g.
                 {"preferred_date": "2026-10-20", "preferred_time_start": "10:00"}.
-            about: Optional doctor or service the request is about, as the caller said it.
+            about: Optional directory entry the request is about, as the caller said it.
             name: The caller's name for staff, if they gave it.
             callback_number: A number the caller dictated, with country code (+91…).
             use_calling_number: True if the caller agreed to be called back on the number

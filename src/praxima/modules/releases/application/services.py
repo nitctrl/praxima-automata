@@ -48,13 +48,18 @@ async def build_snapshot(
 ) -> dict[str, Any]:
     """Everything published for this agent, validated, in canonical form."""
     workspace = await tenancy.get_workspace(session, workspace_id)
+    pack = await tenancy.installed_pack(session, workspace_id)
     agent = await agents.get_agent(session, agent_id)
     published = await catalog.published_catalog(session, at)
     content = await knowledge.published_knowledge(session, at)
     kinds = await engagement.work_item_kinds(session)
     snapshot = {
         "schema_version": SCHEMA_VERSION,
-        "pack": {"key": workspace.pack_key, "version": workspace.pack_version},
+        "pack": {
+            "key": workspace.pack_key,
+            "version": workspace.pack_version,
+            "callback_kind": pack.callback_kind,
+        },
         "workspace": {
             "name": workspace.name,
             "timezone": workspace.timezone,

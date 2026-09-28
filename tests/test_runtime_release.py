@@ -294,8 +294,63 @@ def test_prompt_lists_request_types_only_when_allowed():
     none = render_release_prompt(WITH_REQUESTS, NOW)
     assert "create_request" not in none  # neither request tool is enabled in RAW
     callbacks = AgentSnapshot.model_validate(
-        RAW | {"work_item_kinds": KINDS, "tools": [{"key": "request_callback"}]}
+        RAW
+        | {
+            "work_item_kinds": KINDS,
+            "tools": [{"key": "request_callback"}],
+            "pack": {"key": "clinic", "version": "1.1.0", "callback_kind": "callback_request"},
+        }
     )
     prompt = render_release_prompt(callbacks, NOW)
     assert "callback_request" in prompt and "appointment_request" not in prompt
     assert "never a booking" in prompt and '"one_of": ["fees", "other_admin"]' in prompt
+
+
+def test_prompt_and_tools_follow_the_pack():
+    from praxima.runtime.prompting import release_template
+    from praxima.runtime.release.knowledge import ReleaseKnowledge
+
+    assert release_template("clinic") == "clinic/prompts/release_system_prompt.j2"
+    assert release_template("real_estate") == "_template/prompts/release_system_prompt.j2"
+    assert release_template("../etc") == "_template/prompts/release_system_prompt.j2"
+    other = AgentSnapshot.model_validate(RAW | {"pack": {"key": "real_estate", "version": "1.0.0"}})
+    neutral = render_release_prompt(other, NOW)
+    assert "diagnose" not in neutral and "professional advice" in neutral
+    assert "Doctor, Service" in neutral  # entry names come from the release, not the code
+
+    callbacks = AgentSnapshot.model_validate(
+        RAW
+        | {
+            "work_item_kinds": KINDS,
+            "tools": [{"key": "request_callback"}, {"key": "find_entities"}],
+            "pack": {"key": "x", "version": "1.0.0", "callback_kind": "callback_request"},
+        }
+    )
+    knowledge = ReleaseKnowledge(
+        LoadedRelease(uuid.uuid4(), 1, uuid.uuid4(), uuid.uuid4(), callbacks)
+    )
+    assert knowledge._request_kinds() == {"callback_request"}
+    no_callback = ReleaseKnowledge(
+        LoadedRelease(
+            uuid.uuid4(),
+            1,
+            uuid.uuid4(),
+            uuid.uuid4(),
+            AgentSnapshot.model_validate(
+                RAW | {"work_item_kinds": KINDS, "tools": [{"key": "request_callback"}]}
+            ),
+        )
+    )
+    assert no_callback._request_kinds() == set()  # older v4 snapshot: pack names no callback type
+
+    from livekit.agents import llm
+
+    schemas = [
+        llm.utils.build_legacy_openai_schema(t)["function"] for t in knowledge.function_tools()
+    ]
+    finder = next(s for s in schemas if s["name"] == "find_entities")
+    assert (
+        "doctor (Doctor)" in finder["description"] and "service (Service)" in finder["description"]
+    )
+    assert set(finder["parameters"]["properties"]) == {"query", "entity_type"}
+    assert "create_request" in {s["name"] for s in schemas}

@@ -1,6 +1,7 @@
 {
   "key": "service",
   "name": "Service",
+  "plural_name": "Services",
   "description": "A consultation, test or procedure the clinic offers.",
   "schema_version": 1,
   "searchable_fields": ["name", "category"],

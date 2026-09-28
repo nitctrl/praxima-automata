@@ -1,6 +1,7 @@
 {
   "key": "doctor",
   "name": "Doctor",
+  "plural_name": "Doctors",
   "description": "A doctor who consults at the clinic.",
   "schema_version": 1,
   "searchable_fields": ["name", "specialization", "qualification"],

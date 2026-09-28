@@ -23,6 +23,9 @@ class _Strict(BaseModel):
 class PackRef(_Strict):
     key: str
     version: str
+    # The request type the generic request_callback tool creates (added compatibly: absent in
+    # older v4 snapshots, which then offer no callback-only tool).
+    callback_kind: str | None = None
 
 
 class WorkspaceInfo(_Strict):

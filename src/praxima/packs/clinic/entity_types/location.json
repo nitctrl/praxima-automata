@@ -1,6 +1,7 @@
 {
   "key": "location",
   "name": "Location",
+  "plural_name": "Locations",
   "description": "A clinic branch or consultation address.",
   "schema_version": 1,
   "searchable_fields": ["name", "city", "landmark"],

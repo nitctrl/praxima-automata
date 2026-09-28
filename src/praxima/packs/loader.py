@@ -51,6 +51,7 @@ class Strict(BaseModel):
 class EntityTypeSpec(Strict):
     key: str = Field(pattern=KEY)
     name: str = Field(min_length=1, max_length=150)
+    plural_name: str = Field(default="", max_length=150)  # "Properties"; UIs guess if empty
     description: str = ""
     schema_version: int = Field(ge=1)
     searchable_fields: tuple[str, ...] = ()
@@ -105,6 +106,14 @@ class WorkItemKindSpec(Strict):
         return self
 
 
+class AgentDefaults(Strict):
+    """Starter wording offered when staff create an agent (they can change all of it)."""
+
+    greeting_message: str = Field(min_length=1, max_length=2000)
+    emergency_message: str = Field(min_length=1, max_length=2000)
+    fallback_message: str = Field(min_length=1, max_length=2000)
+
+
 class Pack(Strict):
     key: str = Field(pattern=KEY)
     version: str = Field(pattern=SEMVER)
@@ -118,6 +127,9 @@ class Pack(Strict):
     document_categories: tuple[str, ...] = ()
     announcement_kinds: tuple[str, ...] = ()
     work_item_kinds: tuple[WorkItemKindSpec, ...] = ()
+    # The work item kind the generic "request_callback" tool creates (none: no such tool).
+    callback_kind: str | None = None
+    agent_defaults: AgentDefaults | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> "Pack":
@@ -140,6 +152,8 @@ class Pack(Strict):
         for kind in self.work_item_kinds:
             if set(kind.subject_types) - set(types):
                 raise PackError(f"work item kind {kind.key}: unknown subject type")
+        if self.callback_kind is not None and self.callback_kind not in kinds:
+            raise PackError(f"pack {self.key}: callback_kind must be one of its work item kinds")
         for name, keys in (
             ("document categories", self.document_categories),
             ("announcement kinds", self.announcement_kinds),

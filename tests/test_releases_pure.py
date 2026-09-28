@@ -53,7 +53,9 @@ SNAPSHOT = {
 
 
 def test_snapshot_is_strict_and_versioned():
-    assert AgentSnapshot.model_validate(SNAPSHOT).model_dump(mode="json") == SNAPSHOT
+    dumped = AgentSnapshot.model_validate(SNAPSHOT).model_dump(mode="json")
+    # callback_kind was added compatibly: older snapshots validate, and dump it as None.
+    assert dumped == SNAPSHOT | {"pack": SNAPSHOT["pack"] | {"callback_kind": None}}
     with pytest.raises(ValidationError):
         AgentSnapshot.model_validate(SNAPSHOT | {"schema_version": 3})
     with pytest.raises(ValidationError):

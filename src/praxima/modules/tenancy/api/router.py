@@ -13,8 +13,11 @@ from praxima.entrypoints.http.deps import (
 from praxima.entrypoints.http.responses import Page, PageInfo
 from praxima.modules import catalog, engagement, iam, tenancy
 from praxima.modules.tenancy.api.schemas import (
+    AgentDefaultsOut,
+    EntityLabelOut,
     OrganizationIn,
     OrganizationOut,
+    PackDetailsOut,
     PackOut,
     WorkspaceIn,
     WorkspaceOut,
@@ -50,6 +53,29 @@ async def update_workspace(body: WorkspacePatch, access: WorkspaceAccess) -> Wor
         changes=body.changes(),
     )
     return WorkspaceOut.of(await tenancy.get_workspace(access.session, access.workspace_id))
+
+
+@router.get("/workspaces/{workspace_id}/pack")
+async def read_workspace_pack(access: WorkspaceAccess) -> PackDetailsOut:
+    """The installed pack's vocabulary: labels, categories, kinds and starter wording."""
+    iam.require(access.actor, "workspace:read")
+    assert access.workspace_id is not None
+    pack = await tenancy.installed_pack(access.session, access.workspace_id)
+    return PackDetailsOut(
+        key=pack.key,
+        version=pack.version,
+        name=pack.name,
+        industry=pack.industry,
+        entity_labels={
+            t.key: EntityLabelOut(name=t.name, plural_name=t.plural_name) for t in pack.entity_types
+        },
+        document_categories=list(pack.document_categories),
+        announcement_kinds=list(pack.announcement_kinds),
+        callback_kind=pack.callback_kind,
+        agent_defaults=AgentDefaultsOut(**pack.agent_defaults.model_dump())
+        if pack.agent_defaults
+        else None,
+    )
 
 
 @router.get("/packs")

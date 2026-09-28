@@ -1,5 +1,6 @@
 """Jinja-rendered voice policy with published quick daily information."""
 
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -35,6 +36,25 @@ def render_prompt(snapshot: Snapshot) -> str:
     ).strip()
 
 
+PACKS = Path(__file__).resolve().parents[1] / "packs"
+PACK_KEY = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+RELEASE_TEMPLATE = "prompts/release_system_prompt.j2"
+RELEASE_ENVIRONMENT = Environment(
+    loader=FileSystemLoader(PACKS),
+    autoescape=False,
+    undefined=StrictUndefined,
+    trim_blocks=True,
+    lstrip_blocks=True,
+)
+
+
+def release_template(pack_key: str) -> str:
+    """The pack's own release prompt if it ships one, else the domain-neutral default."""
+    if PACK_KEY.fullmatch(pack_key) and (PACKS / pack_key / RELEASE_TEMPLATE).is_file():
+        return f"{pack_key}/{RELEASE_TEMPLATE}"
+    return f"_template/{RELEASE_TEMPLATE}"
+
+
 def render_release_prompt(snapshot: "AgentSnapshot", now: datetime | None = None) -> str:
     """System prompt for a call pinned to an agent release (schema version 4)."""
     from collections import Counter
@@ -46,18 +66,21 @@ def render_release_prompt(snapshot: "AgentSnapshot", now: datetime | None = None
     )
     counts = Counter(e.type.replace("_", " ") for e in snapshot.entities)
     enabled = {t.key for t in snapshot.tools}
-    # "create_work_item" allows every request type; "request_callback" only callbacks.
+    # "create_work_item" allows every request type; "request_callback" only the pack's
+    # callback type.
+    callback = snapshot.pack.callback_kind
     requestable: set[str] | None = (
         None
         if "create_work_item" in enabled
-        else {"callback_request"}
-        if "request_callback" in enabled
+        else {callback}
+        if "request_callback" in enabled and callback
         else set()
     )
     directory = ", ".join(
         f"{n} {kind}{'' if n == 1 else 's'}" for kind, n in sorted(counts.items())
     )
-    return ENVIRONMENT.get_template("release_system_prompt.j2").render(
+    return RELEASE_ENVIRONMENT.get_template(release_template(snapshot.pack.key)).render(
+        entity_names=[t.name for t in snapshot.entity_types],
         agent_name=snapshot.agent.name,
         business_name=snapshot.workspace.name,
         persona=snapshot.agent.persona,
