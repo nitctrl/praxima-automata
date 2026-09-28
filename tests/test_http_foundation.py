@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
 from sqlalchemy import DateTime
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from praxima.entrypoints.http.deps import Paging
@@ -46,6 +47,10 @@ def _app() -> FastAPI:
     @app.get("/crash")
     async def crash() -> None:
         raise RuntimeError("secret patient name in message")
+
+    @app.get("/database-down")
+    async def database_down() -> None:
+        raise OperationalError("SELECT 1", None, ConnectionRefusedError("host db.secret:5432"))
 
     @app.get("/items")
     async def items(page: Paging) -> Page[int]:
@@ -99,6 +104,15 @@ def test_crash_is_generic_and_logs_only_the_type(caplog):
     assert body["detail"] == "Something went wrong. Try again later."
     assert "secret" not in response.text
     assert "RuntimeError" in caplog.text and "secret" not in caplog.text
+
+
+def test_database_outage_is_a_503_without_details(caplog):
+    with caplog.at_level(logging.ERROR):
+        response = client.get("/database-down")
+    body = _problem(response, 503)
+    assert body["detail"] == "The database is unavailable. Try again shortly."
+    assert "db.secret" not in response.text
+    assert "OperationalError" in caplog.text and "db.secret" not in caplog.text
 
 
 def test_request_id_is_echoed_only_when_valid():

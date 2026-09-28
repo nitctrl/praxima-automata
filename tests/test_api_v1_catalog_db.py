@@ -151,6 +151,13 @@ def test_relations_and_hours(api):
         headers=headers,
     ).json()["id"]
 
+    kinds = browser.get(f"{base}/relation-types").json()["data"]
+    assert [(k["key"], k["from_type"], k["to_type"]) for k in kinds] == [
+        ("doctor_offers_service", "doctor", "service"),
+        ("doctor_at_location", "doctor", "location"),
+    ]
+    assert set(kinds[0]["attributes_schema"]["properties"]) == {"fee", "currency"}
+
     link = {
         "relation_type": "doctor_offers_service",
         "from_entity_id": doctor,

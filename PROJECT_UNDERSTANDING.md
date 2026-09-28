@@ -628,8 +628,8 @@ Consequences:
 5. **Console mode needs `.env.runtime`.** Without the restricted runtime credentials created by
    `provision-runtime`, the agent runs but answers "knowledge unavailable".
 6. **Pack vocabularies aren't exposed by the API yet** (document categories, announcement
-   kinds, relation types). The backend validates them; the console offers suggestions, and it
-   can't create directory links until relation types are exposed.
+   kinds). The backend validates them; the console offers suggestions. Relation types are
+   exposed (`GET /relation-types`), so the console can create directory links.
 7. **`docs/product-architecture.md` is a Phase 0 design document.** For the current target,
    read `CLAUDE.md` and `docs/database/database-schema.md` (§16–§19 record what is built).
 
@@ -649,6 +649,8 @@ uv run python scripts/database.py provision-runtime --confirm-development-projec
 
 # B. new platform schema (external Postgres 16+; DB_OWNER_DATABASE_URL in .env)
 uv run alembic upgrade head
+uv run python scripts/packs.py register      # domain packs; the workspace form lists these
+uv run python scripts/check_database.py      # if sign-in says the database is unavailable
 
 uv run uvicorn main:app --reload --port 8080   # API (main.py): legacy /api + /api/v1
 cd ../frontend && corepack pnpm dev   # console on http://127.0.0.1:3000

@@ -79,6 +79,18 @@ class EntityPatch(Strict):
         )
 
 
+class RelationTypeOut(BaseModel):
+    key: str
+    from_type: str
+    to_type: str
+    description: str
+    attributes_schema: dict[str, Any]
+
+    @classmethod
+    def of(cls, view: catalog.RelationTypeView) -> "RelationTypeOut":
+        return cls(**view.__dict__)
+
+
 class RelationIn(Strict):
     relation_type: str = Field(min_length=2, max_length=63)
     from_entity_id: uuid.UUID

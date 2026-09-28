@@ -9,6 +9,7 @@ from sqlalchemy import ColumnElement, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
+from praxima.modules import tenancy
 from praxima.modules.catalog.infrastructure.models import (
     AvailabilityException,
     AvailabilityRule,
@@ -83,6 +84,24 @@ class ExceptionView:
     end_time: time | None
     public_message: str | None
     publication_status: str
+
+
+@dataclass(frozen=True)
+class RelationTypeView:
+    key: str
+    from_type: str
+    to_type: str
+    description: str
+    attributes_schema: dict[str, Any]
+
+
+async def relation_types(session: AsyncSession, workspace_id: uuid.UUID) -> list[RelationTypeView]:
+    """The link types the workspace's pack allows (e.g. doctor offers service, with a fee)."""
+    pack = await tenancy.installed_pack(session, workspace_id)
+    return [
+        RelationTypeView(r.key, r.from_type, r.to_type, r.description, r.attributes_schema)
+        for r in pack.relation_types
+    ]
 
 
 async def entity_types(session: AsyncSession) -> list[EntityTypeView]:

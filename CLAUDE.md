@@ -126,6 +126,8 @@ uv run python scripts/dashboard.py        # same API without reload, access log 
 docker compose up -d qdrant               # optional semantic search (today)
 
 uv run alembic upgrade head               # apply new-schema revisions (DB_OWNER_DATABASE_URL)
+uv run python scripts/packs.py register    # register shipped domain packs (needed before creating workspaces)
+uv run python scripts/check_database.py   # diagnose the /api/v1 database connection (never prints secrets)
 uv run alembic upgrade head --sql         # print the SQL only (review / squawk), no database
 uv run alembic revision --autogenerate --rev-id 0002 -m "iam and tenancy"   # draft; review it
 
@@ -471,6 +473,7 @@ POST-for-everything) migrate to this. Change the backend and
 | GET | `/workspaces/{wsId}/work-item-kinds` | ✅ installed from the pack: payload schema, stages, subject types |
 | GET, POST / GET, PATCH, DELETE | `/workspaces/{wsId}/entities[/{id}]` | ✅ `?type=&status=&q=`; attributes validated by type schema; PATCH also sets `publication_status`; DELETE needs `?row_version=` |
 | GET | `/workspaces/{wsId}/entities/{id}/relations`, `…/availability` | ✅ links (both directions) and hours |
+| GET | `/workspaces/{wsId}/relation-types` | ✅ link types from the pack: from/to entity types, attribute schema |
 | POST / PATCH / DELETE | `/workspaces/{wsId}/relations[/{id}]` | ✅ pack-checked links; PATCH sets `publication_status` |
 | POST / PATCH | `/workspaces/{wsId}/availability-rules`, `/availability-exceptions` | ✅ weekly hours (RRULE) and dated exceptions |
 | GET, POST / GET, PATCH, DELETE | `/workspaces/{wsId}/announcements[/{id}]` | ✅ live updates; `?active=true` = in effect now; times must include a zone |

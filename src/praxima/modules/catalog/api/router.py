@@ -19,6 +19,7 @@ from praxima.modules.catalog.api.schemas import (
     ExceptionOut,
     RelationIn,
     RelationOut,
+    RelationTypeOut,
     RuleIn,
     RuleOut,
     Status,
@@ -99,6 +100,17 @@ async def delete_entity(
     await catalog.delete_entity(
         access.session, access.actor, entity_id=entity_id, row_version=row_version
     )
+
+
+@router.get("/relation-types")
+async def list_relation_types(access: WorkspaceAccess) -> Page[RelationTypeOut]:
+    """Link types from the workspace's pack: which entity types they join, and their fields."""
+    iam.require(access.actor, "catalog:read")
+    types = [
+        RelationTypeOut.of(r)
+        for r in await catalog.relation_types(access.session, _workspace(access))
+    ]
+    return Page(data=types, page=PageInfo(limit=len(types), next_cursor=None))
 
 
 @router.get("/entities/{entity_id}/relations")

@@ -4,12 +4,14 @@ import logging
 import re
 import uuid
 
+from sqlalchemy.exc import InterfaceError, OperationalError
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
 
-from praxima.entrypoints.http.errors import internal_error
+from praxima.entrypoints.http.errors import from_app_error, internal_error
 from praxima.shared import context
+from praxima.shared.errors import Unavailable
 
 logger = logging.getLogger(__name__)
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -29,6 +31,12 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         token = context.request_id.set(request_id)
         try:
             response = await call_next(request)
+        except (OperationalError, InterfaceError) as exc:
+            # The database can't be reached (down, wrong URL, network): a 503, not a bug.
+            logger.error("Database unavailable: %s (request_id=%s)", type(exc).__name__, request_id)
+            response = from_app_error(
+                Unavailable("The database is unavailable. Try again shortly.")
+            )
         except Exception as exc:
             logger.error("Unhandled %s (request_id=%s)", type(exc).__name__, request_id)
             response = internal_error()
