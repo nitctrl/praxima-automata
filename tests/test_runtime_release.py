@@ -311,9 +311,12 @@ def test_prompt_and_tools_follow_the_pack():
     from praxima.runtime.release.knowledge import ReleaseKnowledge
 
     assert release_template("clinic") == "clinic/prompts/release_system_prompt.j2"
-    assert release_template("real_estate") == "_template/prompts/release_system_prompt.j2"
+    assert release_template("real_estate") == "real_estate/prompts/release_system_prompt.j2"
+    assert (
+        release_template("hotel") == "_template/prompts/release_system_prompt.j2"
+    )  # no own prompt
     assert release_template("../etc") == "_template/prompts/release_system_prompt.j2"
-    other = AgentSnapshot.model_validate(RAW | {"pack": {"key": "real_estate", "version": "1.0.0"}})
+    other = AgentSnapshot.model_validate(RAW | {"pack": {"key": "hotel", "version": "1.0.0"}})
     neutral = render_release_prompt(other, NOW)
     assert "diagnose" not in neutral and "professional advice" in neutral
     assert "Doctor, Service" in neutral  # entry names come from the release, not the code

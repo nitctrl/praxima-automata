@@ -1,0 +1,20 @@
+{
+  "key": "site_visit_request",
+  "name": "Site visit request",
+  "schema_version": 1,
+  "subject_types": ["project", "property"],
+  "stages": ["new", "contacted", "visit_confirmed", "visited", "closed", "cancelled"],
+  "initial_stage": "new",
+  "terminal_stages": ["closed", "cancelled"],
+  "payload_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "preferred_date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+      "preferred_time_start": {"type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$"},
+      "preferred_time_end": {"type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$"},
+      "visitors": {"type": "integer", "minimum": 1, "maximum": 10},
+      "needs_pickup": {"type": "boolean"}
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "key": "lead_inquiry",
+  "name": "Lead inquiry",
+  "schema_version": 1,
+  "subject_types": ["project", "property"],
+  "stages": ["new", "contacted", "qualified", "negotiation", "won", "lost"],
+  "initial_stage": "new",
+  "terminal_stages": ["won", "lost"],
+  "payload_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "property_type": {"enum": ["apartment", "villa", "row_house", "plot", "office", "shop"]},
+      "bedrooms": {"type": "integer", "minimum": 0, "maximum": 10},
+      "budget_min": {"type": "number", "minimum": 0},
+      "budget_max": {"type": "number", "minimum": 0},
+      "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+      "purpose": {"enum": ["self_use", "investment"]},
+      "timeline": {"enum": ["immediately", "within_3_months", "within_6_months", "later"]},
+      "home_loan_needed": {"type": "boolean"},
+      "preferred_locality": {"type": "string", "maxLength": 80}
+    }
+  }
+}

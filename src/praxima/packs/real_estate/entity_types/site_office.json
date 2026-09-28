@@ -1,0 +1,22 @@
+{
+  "key": "site_office",
+  "name": "Site office",
+  "plural_name": "Site offices",
+  "description": "Where visitors meet the sales team (site or sales office).",
+  "schema_version": 1,
+  "searchable_fields": ["name", "city", "landmark"],
+  "display_template": {"title": "{name}", "subtitle": "{city}"},
+  "attributes_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["address", "city"],
+    "properties": {
+      "address": {"type": "string", "minLength": 1, "maxLength": 300},
+      "city": {"type": "string", "minLength": 1, "maxLength": 80},
+      "pincode": {"type": "string", "pattern": "^[0-9]{6}$"},
+      "landmark": {"type": "string", "maxLength": 200},
+      "map_url": {"type": "string", "maxLength": 500, "pattern": "^https://"},
+      "parking": {"type": "boolean"}
+    }
+  }
+}

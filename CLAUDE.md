@@ -282,8 +282,8 @@ packs/<pack_id>/
 └── extensions.py            # optional: registered hooks (e.g. speech normalizer), kept tiny
 ```
 
-- Packs ship with the platform: `clinic` first, then `real_estate`, and `_template` for new
-  ones. Each released pack version is registered in `tenancy.pack_versions`.
+- Packs ship with the platform: `clinic` and `real_estate` (both built), and `_template`
+  (the domain-neutral default voice prompt) for new ones. Each released pack version is registered in `tenancy.pack_versions`.
 - **Installing a pack** into a workspace sets `workspaces.pack_key` / `pack_version` and
   copies the pack's entity types and work item kinds into that workspace's tables. Upgrading
   a pack is an explicit, versioned operation. Release snapshots record the pack key and
@@ -443,8 +443,8 @@ praxima-automata/
    release `schema_version` to 4. Existing data is fictional, so re-seed from
    `packs/clinic/seeds/` rather than migrating data. Keep the old schema until the voice path
    is verified on the new one.
-6. **Second pack (`real_estate`)** is the proof that the design is generic: it must need no
-   core code changes.
+6. ✅ **Second pack (`real_estate`)** is the proof that the design is generic: it was added with
+   no core code changes (only `packs/real_estate/` and tests).
 
 Keep refactors and behaviour changes in separate commits. The voice call path must work
 after every step.

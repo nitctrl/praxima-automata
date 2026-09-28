@@ -1,0 +1,25 @@
+{
+  "key": "property",
+  "name": "Property",
+  "plural_name": "Properties",
+  "description": "A unit type or listing, e.g. a 2 BHK apartment in a project.",
+  "schema_version": 1,
+  "searchable_fields": ["name", "property_type", "configuration"],
+  "display_template": {"title": "{name}", "subtitle": "{configuration}"},
+  "attributes_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["property_type"],
+    "properties": {
+      "property_type": {"enum": ["apartment", "villa", "row_house", "plot", "office", "shop"]},
+      "configuration": {"type": "string", "maxLength": 40, "description": "e.g. 2 BHK"},
+      "bedrooms": {"type": "integer", "minimum": 0, "maximum": 10},
+      "carpet_area_sqft": {"type": "number", "minimum": 0},
+      "price_from": {"type": "number", "minimum": 0, "description": "Published starting price"},
+      "price_to": {"type": "number", "minimum": 0},
+      "currency": {"type": "string", "pattern": "^[A-Z]{3}$"},
+      "availability": {"enum": ["available", "few_left", "sold_out"]},
+      "facing": {"enum": ["north", "south", "east", "west", "north_east", "north_west", "south_east", "south_west"]}
+    }
+  }
+}

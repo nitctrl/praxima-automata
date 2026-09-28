@@ -531,9 +531,19 @@ workspaces keep working with fallbacks).
 
 `packs/loader.py` validates a pack and computes a checksum. Pack versions are registered in
 `tenancy.pack_versions`. Creating a workspace (`POST /organizations/{org}/workspaces`)
-**installs** its pack's entity types and work item kinds. The clinic pack
-(`packs/clinic/`) is the only one so far; `real_estate` is the planned proof that no core
-change is needed.
+**installs** its pack's entity types and work item kinds.
+
+Two packs ship:
+- **`clinic` 1.1.0:** doctors, services and locations; appointment and callback requests.
+- **`real_estate` 1.0.0:**
+  - projects, properties (unit types or listings), site offices and sales agents
+  - site-visit requests, lead inquiries and callbacks
+  - its own voice prompt: prices only as published, no allotment or legal/financial advice
+
+The real-estate pack was added **with no core code changes**, only files under
+`packs/real_estate/` plus tests. `tests/test_packs.py` checks every pack is complete, and
+`tests/test_real_estate_pack_db.py` drives a real-estate workspace end to end: directory,
+links, hours, leads, a release, and a call that leaves a site-visit request.
 
 ### 9.6 Knowledge (step 3)
 

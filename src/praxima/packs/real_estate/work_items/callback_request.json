@@ -1,0 +1,19 @@
+{
+  "key": "callback_request",
+  "name": "Callback request",
+  "schema_version": 1,
+  "subject_types": ["project"],
+  "stages": ["new", "contacted", "closed", "cancelled"],
+  "initial_stage": "new",
+  "terminal_stages": ["closed", "cancelled"],
+  "payload_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "requested_time": {"type": "string", "maxLength": 40},
+      "reason_category": {
+        "enum": ["pricing", "availability", "site_visit", "documents", "home_loan", "other"]
+      }
+    }
+  }
+}
