@@ -288,6 +288,31 @@ def test_settings_reject_privileged_key_and_non_tls_origin():
         WebSettings(CONFIG.supabase_url, CONFIG.publishable_key, "http://public.example")
 
 
+def test_several_dashboard_origins():
+    both = WebSettings(
+        CONFIG.supabase_url, CONFIG.publishable_key, "http://127.0.0.1:3000, http://localhost:3000/"
+    )
+    assert both.origins == ("http://127.0.0.1:3000", "http://localhost:3000")
+    assert both.secure is False  # loopback HTTP: no Secure cookies or HSTS
+    assert WebSettings(
+        CONFIG.supabase_url, CONFIG.publishable_key, "https://a.example,https://b.example"
+    ).secure
+    for bad in ("http://127.0.0.1:3000,http://public.example", " , "):
+        with pytest.raises(ValueError):  # every origin is checked on its own
+            WebSettings(CONFIG.supabase_url, CONFIG.publishable_key, bad)
+
+    unused = httpx.MockTransport(lambda request: httpx.Response(404))
+    app = create_app(both, gateway=SupabaseGateway(both, unused))
+    for origin in both.origins:
+        client = TestClient(app, base_url=origin)
+        assert client.get("/health").status_code == 200  # both hosts are trusted
+        # Writes pass the Origin check (then need a session), from either origin.
+        assert client.post("/api/logout", json={}, headers={"Origin": origin}).status_code == 401
+        refused = client.post("/api/logout", json={}, headers={"Origin": "http://evil.example"})
+        assert refused.status_code == 403
+    assert TestClient(app, base_url="http://evil.example").get("/health").status_code == 400
+
+
 def test_agent_test_uses_one_rag_path_and_stays_tenant_scoped(web, content):  # noqa: F811
     client, state = web
     endpoint = f"/api/clinics/{CLINIC}/test"

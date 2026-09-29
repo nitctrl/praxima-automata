@@ -1,7 +1,7 @@
 """Staff dashboard JSON API with Supabase-verified bearer sessions.
 
 The UI is a separate Next.js app (../frontend) that proxies /api/* to this server,
-so the browser sees one origin: set CLINIC_DASHBOARD_ORIGIN to the frontend's origin.
+so the browser sees one origin: set DASHBOARD_ORIGIN to the frontend's origin.
 
 The server never uses migration/service-role credentials. Supabase Auth verifies
 the user on every protected request; PostgREST additionally validates the JWT and
@@ -81,10 +81,22 @@ STAFF = MANAGERS | {"receptionist"}
 class WebSettings:
     supabase_url: str
     publishable_key: str = field(repr=False)
+    # One dashboard origin, or several separated by commas (e.g. 127.0.0.1 and localhost).
     origin: str
 
+    @property
+    def origins(self) -> tuple[str, ...]:
+        """Every allowed dashboard origin, exactly as browsers send it (no trailing slash)."""
+        found = [o.strip().rstrip("/") for o in self.origin.split(",")]
+        return tuple(dict.fromkeys(o for o in found if o))
+
+    @property
+    def secure(self) -> bool:
+        """HTTPS everywhere: Secure cookies and HSTS. Loopback HTTP is development only."""
+        return all(o.startswith("https:") for o in self.origins)
+
     def __post_init__(self) -> None:
-        sb, site = urlsplit(self.supabase_url), urlsplit(self.origin)
+        sb = urlsplit(self.supabase_url)
         if (
             sb.scheme != "https"
             or not sb.hostname
@@ -95,15 +107,19 @@ class WebSettings:
             or sb.username
         ):
             raise ValueError("Use the dedicated Supabase HTTPS origin")
-        local = site.hostname in {"localhost", "127.0.0.1"}
-        if (site.scheme != "https" and not (local and site.scheme == "http")) or (
-            site.path not in {"", "/"}
-            or site.query
-            or site.fragment
-            or site.username
-            or not site.hostname
-        ):
-            raise ValueError("Dashboard requires HTTPS, except loopback development")
+        if not self.origins:
+            raise ValueError("Set at least one dashboard origin")
+        for origin in self.origins:
+            site = urlsplit(origin)
+            local = site.hostname in {"localhost", "127.0.0.1"}
+            if (site.scheme != "https" and not (local and site.scheme == "http")) or (
+                site.path not in {"", "/"}
+                or site.query
+                or site.fragment
+                or site.username
+                or not site.hostname
+            ):
+                raise ValueError("Dashboard requires HTTPS, except loopback development")
         if not self.publishable_key.startswith("sb_publishable_"):
             raise ValueError("Use a Supabase publishable key, never a privileged key")
 
@@ -112,7 +128,7 @@ class WebSettings:
         return cls(
             os.environ["SUPABASE_URL"].rstrip("/"),
             os.environ["SUPABASE_PUBLISHABLE_KEY"],
-            os.environ.get("CLINIC_DASHBOARD_ORIGIN", "http://127.0.0.1:3000").rstrip("/"),
+            os.environ.get("DASHBOARD_ORIGIN", "http://127.0.0.1:3000"),
         )
 
 
@@ -206,14 +222,14 @@ def create_app(
     app = FastAPI(
         title="Clinic reception", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan
     )
-    hostname = urlsplit(config.origin).hostname
-    assert hostname is not None  # WebSettings rejects an origin without a hostname.
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=[hostname])
+    # WebSettings rejects any origin without a hostname.
+    hostnames = list(dict.fromkeys(urlsplit(o).hostname or "" for o in config.origins))
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=hostnames)
     app.state.sessions = api_sessions
     app.state.web_sessions = SessionStore()
     app.state.identity_gateway = backend
     app.state.login_limiter = RateLimiter(per_minute=10)
-    app.state.cookie_secure = config.origin.startswith("https:")
+    app.state.cookie_secure = config.secure
     app.state.knowledge_index = knowledge_index  # Qdrant; None → keyword search only
     app.state.vault = vault
     app.state.self_signup = self_signup
@@ -240,7 +256,7 @@ def create_app(
             peer = request.client.host if request.client else "unknown"
             rate(peer, 180)
             if request.method not in {"GET", "HEAD", "OPTIONS"}:
-                if request.headers.get("origin") != config.origin:
+                if request.headers.get("origin") not in config.origins:
                     raise HTTPException(403, "Origin verification failed.")
                 # Document review is the only non-JSON, larger-than-form request surface.
                 upload = request.url.path.endswith("/documents/upload") or (
@@ -278,7 +294,7 @@ def create_app(
                 "Permissions-Policy": "microphone=(), camera=(), geolocation=()",
             }
         )
-        if config.origin.startswith("https:"):
+        if config.secure:
             result.headers["Strict-Transport-Security"] = "max-age=31536000"
         return result
 
@@ -373,7 +389,7 @@ def create_app(
             "clinic_session",
             sid,
             httponly=True,
-            secure=config.origin.startswith("https:"),
+            secure=config.secure,
             samesite="strict",
             max_age=ttl,
             path="/",
