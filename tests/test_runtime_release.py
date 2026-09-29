@@ -357,3 +357,65 @@ def test_prompt_and_tools_follow_the_pack():
     )
     assert set(finder["parameters"]["properties"]) == {"query", "entity_type"}
     assert "create_request" in {s["name"] for s in schemas}
+
+
+def test_search_also_finds_directory_entries():
+    fee = lookup.search_knowledge(SNAPSHOT, "ECG fees", NOW)["passages"]
+    assert fee[0]["source"] == "directory" and fee[0]["heading"] == "ECG"
+    assert "Fee: 300" in fee[0]["text"]
+    sharma = lookup.search_knowledge(SNAPSHOT, "Dr Sharma cardiology", NOW)["passages"][0]
+    assert sharma["heading"] == "Dr. Asha Sharma"
+    assert "Doctor offers service: ECG (500 INR)" in sharma["text"]  # the link's own fee
+    # Directory entries never crowd documents out: at most two per answer.
+    many = AgentSnapshot.model_validate(
+        RAW
+        | {
+            "entities": [
+                {
+                    "id": f"e{i}",
+                    "type": "doctor",
+                    "key": f"dr-{i}",
+                    "name": f"Dr {i} Kumar",
+                    "aliases": [],
+                    "attributes": {"specialization": "Cardiology"},
+                }
+                for i in range(5)
+            ]
+        }
+    )
+    found = lookup.search_knowledge(many, "cardiology", NOW)["passages"]
+    assert sum(p["source"] == "directory" for p in found) == 2
+
+
+def test_sections_tagged_with_a_named_entry_rank_higher():
+    tagged = AgentSnapshot.model_validate(
+        RAW
+        | {
+            "knowledge_sections": [
+                {
+                    "id": "k1",
+                    "document_title": "Staff policies",
+                    "category": "policies",
+                    "heading": "Leave policy",
+                    "text": "Staff apply for leave a week ahead.",
+                    "entity_id": None,
+                    "keywords": [],
+                },
+                {
+                    "id": "k2",
+                    "document_title": "Doctor profiles",
+                    "category": "doctor_bio",
+                    "heading": "Leave policy",
+                    "text": "Leave is announced a week ahead.",
+                    "entity_id": "d1",
+                    "keywords": [],
+                },
+            ]
+        }
+    )
+    documents = [
+        p
+        for p in lookup.search_knowledge(tagged, "Sharma leave policy", NOW)["passages"]
+        if p["source"] != "directory"
+    ]
+    assert documents[0]["source"] == "Doctor profiles"

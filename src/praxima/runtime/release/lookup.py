@@ -90,14 +90,8 @@ def _names(snapshot: AgentSnapshot) -> dict[str, EntityItem]:
     return {e.id: e for e in snapshot.entities}
 
 
-def get_entity(snapshot: AgentSnapshot, name: str) -> dict[str, Any]:
-    """One entry in full: its details and what it's linked to (fees, locations …)."""
-    entity = resolve_entity(snapshot, name)
-    if entity is None:
-        return {
-            "status": "not_found",
-            "hint": "Ask which one the caller means, or use find_entities.",
-        }
+def _links(snapshot: AgentSnapshot, entity: EntityItem) -> list[dict[str, Any]]:
+    """What an entry is linked to, with any details on the link (fees …)."""
     by_id = _names(snapshot)
     links = []
     for relation in snapshot.relations:
@@ -118,7 +112,18 @@ def get_entity(snapshot: AgentSnapshot, name: str) -> dict[str, Any]:
                     **relation.attributes,
                 }
             )
-    return {"status": "success", "entity": _brief(entity), "links": links}
+    return links
+
+
+def get_entity(snapshot: AgentSnapshot, name: str) -> dict[str, Any]:
+    """One entry in full: its details and what it's linked to (fees, locations …)."""
+    entity = resolve_entity(snapshot, name)
+    if entity is None:
+        return {
+            "status": "not_found",
+            "hint": "Ask which one the caller means, or use find_entities.",
+        }
+    return {"status": "success", "entity": _brief(entity), "links": _links(snapshot, entity)}
 
 
 def _clock(value: str | None) -> time | None:
@@ -237,27 +242,93 @@ def _trim(text: str, words: set[str]) -> str:
     return ("…" if start else "") + text[start : start + MAX_TEXT].strip() + "…"
 
 
+MAX_DIRECTORY_PASSAGES = 2
+
+
+def _plain(value: Any) -> str:
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, list):
+        return ", ".join(_plain(v) for v in value)
+    return str(value)
+
+
+def describe_entity(snapshot: AgentSnapshot, entity: EntityItem) -> str:
+    """One readable line for a directory entry: its details and what it's linked to."""
+    kind = next((t.name for t in snapshot.entity_types if t.key == entity.type), entity.type)
+    parts = [f"{kind}: {entity.name}"]
+    if entity.aliases:
+        parts.append("also called " + ", ".join(entity.aliases))
+    parts += [
+        f"{key.replace('_', ' ').capitalize()}: {_plain(value)}"
+        for key, value in entity.attributes.items()
+        if value not in (None, "", [])
+    ]
+    for link in _links(snapshot, entity):
+        extras = {k: v for k, v in link.items() if k not in ("relation", "with", "with_type")}
+        detail = " ".join(_plain(v) for v in extras.values())
+        relation = link["relation"].replace("_", " ").capitalize()
+        parts.append(f"{relation}: {link['with']}" + (f" ({detail})" if detail else ""))
+    return " · ".join(parts)
+
+
 def search_knowledge(
     snapshot: AgentSnapshot, question: str, now: datetime, limit: int = 4
 ) -> dict[str, Any]:
-    """Published document sections, approved answers and live updates matching the question."""
+    """Published sections, approved answers, live updates and directory entries for a question.
+
+    Directory entries are included (at most two), so a question about a fee or an address
+    finds its answer even if it didn't go to the directory tools. Sections and answers tagged
+    with an entry the question names rank higher.
+    """
     words = _words(question)
     if not words:
         return {"status": "success", "passages": []}
     passages: list[tuple[float, dict[str, Any]]] = []
+    directory: list[tuple[float, dict[str, Any]]] = []
+    named: set[str] = set()
+    for entity in snapshot.entities:
+        head = _matches(words, _words(" ".join([entity.name, *entity.aliases])))
+        body = _matches(
+            words,
+            _words(
+                " ".join(
+                    [
+                        entity.type.replace("_", " "),
+                        *(_plain(v) for v in entity.attributes.values()),
+                    ]
+                )
+            ),
+        )
+        if head:
+            named.add(entity.id)
+        if head or body:
+            directory.append(
+                (
+                    2 * head + body,
+                    {
+                        "source": "directory",
+                        "heading": entity.name,
+                        "text": _trim(describe_entity(snapshot, entity), words),
+                    },
+                )
+            )
+    directory.sort(key=lambda p: -p[0])
+    passages += directory[:MAX_DIRECTORY_PASSAGES]
     for faq in snapshot.faqs:
         head = _matches(words, _words(" ".join([faq.question, *faq.phrasings])))
         body = _matches(words, _words(faq.answer))
+        tagged = 1 if faq.entity_id in named else 0
         if head or body:
             passages.append(
                 (
-                    2 * head + body + 0.5,
+                    2 * head + body + 0.5 + tagged,
                     {"source": "approved answer", "heading": faq.question, "text": faq.answer},
                 )
             )
     for section in snapshot.knowledge_sections:
         head = _matches(words, _words(" ".join([section.heading or "", *section.keywords])))
-        body = _matches(words, _words(section.text))
+        body = _matches(words, _words(section.text)) + (1 if section.entity_id in named else 0)
         if head or body:
             passages.append(
                 (

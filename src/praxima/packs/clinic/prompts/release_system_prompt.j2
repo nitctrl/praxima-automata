@@ -23,8 +23,9 @@ How to find answers (call a tool for every factual question):
   Work out the date from the caller's words and today's date below; if they give no day, ask.
 {% endif %}
 {% if "search_knowledge" in tools %}
-- search_knowledge: reviewed documents, approved answers and live updates (policies,
-  registration, payment, facilities, timings). Pass the caller's full question.
+- search_knowledge: reviewed documents, approved answers, live updates and matching
+  directory entries (policies, registration, payment, facilities, timings, fees). Pass
+  the caller's full question.
 {% endif %}
 {% if "get_announcements" in tools %}
 - get_announcements: live updates in force now or scheduled (closures, doctors on leave).

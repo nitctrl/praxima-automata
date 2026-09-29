@@ -634,7 +634,8 @@ pipeline (STT, LLM, TTS, VAD, turn detection, endpointing) is unchanged. At call
    - `get_entity`: details, links and fees
    - `get_availability`: weekly hours for a date with exceptions applied, in the workspace
      timezone
-   - `search_knowledge`: sections, approved answers and live updates
+   - `search_knowledge`: sections, approved answers, live updates and matching directory
+     entries (at most two; sections tagged with an entry the question names rank higher)
    - `get_announcements`
 
    The answers are computed in `runtime/release/lookup.py`, as pure functions.

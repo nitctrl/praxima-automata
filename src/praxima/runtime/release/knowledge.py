@@ -181,7 +181,7 @@ class ReleaseKnowledge:
 
     @function_tool()
     async def search_knowledge(self, question: str) -> dict[str, Any]:
-        """Search reviewed documents, approved answers and live updates.
+        """Search reviewed documents, approved answers, live updates and directory entries.
 
         Args:
             question: The caller's complete question.
