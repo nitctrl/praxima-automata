@@ -784,7 +784,7 @@ Keys in `.env` (see `.env.example`):
 | --- | --- |
 | Voice | `LIVEKIT_*`, `GOOGLE_API_KEY`, `SARVAM_API_KEY` |
 | Supabase project and auth | `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_PROJECT_REF` |
-| Console origin | `CLINIC_DASHBOARD_ORIGIN=http://127.0.0.1:3000` |
+| Console origin | `DASHBOARD_ORIGIN=http://127.0.0.1:3000` |
 | New platform | `DB_OWNER_DATABASE_URL` (migrations), `APP_API_DATABASE_URL` (API) |
 | CRM personal data | `CLINIC_PII_KEYS`, `CLINIC_PII_KEY_VERSION`, `PRAXIMA_LOOKUP_KEY` |
 | Self-service sign-up | `PRAXIMA_SELF_SIGNUP=true` (registration page + create your own organization) |

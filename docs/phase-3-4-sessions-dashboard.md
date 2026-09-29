@@ -123,7 +123,7 @@ Initial access requires:
    An owner/manager must first review and publish a valid v2 configuration.
    This does not assign any real number to a fictional clinic.
 
-Production must use an HTTPS reverse proxy and matching `CLINIC_DASHBOARD_ORIGIN`.
+Production must use an HTTPS reverse proxy and matching `DASHBOARD_ORIGIN`.
 The launcher binds loopback, disables request access logs and does not trust
 forwarded headers. Configure the edge explicitly; do not expose plain HTTP.
 

@@ -46,7 +46,7 @@ setup, publication requirements and the local voice test's limitations.
 This project is backend only. Start the dashboard API with
 `uv run uvicorn main:app --reload --port 8080` (http://127.0.0.1:8080, JSON only; the app is in `main.py`). The staff UI is a
 separate Next.js app in `../frontend` that proxies `/api/*` here; see
-`../frontend/FRONTEND_ARCHITECTURE.md`. Set `CLINIC_DASHBOARD_ORIGIN` to the frontend's
+`../frontend/FRONTEND_ARCHITECTURE.md`. Set `DASHBOARD_ORIGIN` to the frontend's
 origin (`http://127.0.0.1:3000` locally). Sign-in requires a Supabase Auth account with a clinic
 membership; there is no seeded login. See [setup, permissions, verification and
 remaining activation gates](docs/phase-3-4-sessions-dashboard.md).
