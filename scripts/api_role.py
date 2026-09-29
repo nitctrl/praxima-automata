@@ -3,14 +3,14 @@
 The API must never log in as the owner when the owner bypasses RLS (Supabase's `postgres`
 does, as does any superuser): every signed-in user would then see every organization.
 
-    uv run python scripts/api_role.py grant <role>   # allow <role> the module tables
+    uv run python scripts/api_role.py grant <role>   # module tables + platform admin functions
     uv run python scripts/api_role.py check <role>   # confirm it's restricted and complete
 
 Create the login yourself first (as a database admin), e.g. in psql or Supabase's SQL editor:
     CREATE ROLE praxima_api LOGIN PASSWORD '<a long random password>';
 then set APP_API_DATABASE_URL to connect as it (on Supabase's session pooler the user name is
-`praxima_api.<project-ref>`). Re-run `grant` after every `alembic upgrade` that adds tables.
-Uses DB_OWNER_DATABASE_URL (the migration owner, which owns the tables).
+`praxima_api.<project-ref>`). Re-run `grant` after every `alembic upgrade` that adds tables
+or functions. Uses DB_OWNER_DATABASE_URL (the migration owner, which owns the tables).
 """
 
 import argparse
@@ -31,6 +31,14 @@ ROOT = Path(__file__).resolve().parents[1]
 SCHEMAS = ("iam", "tenancy", "agents", "releases", "catalog", "knowledge", "engagement", "audit")
 # Platform tables: the API reads them; only migrations and scripts change them.
 READ_ONLY = ("tenancy.pack_versions", "iam.platform_admins")
+# Platform admin writes (migration 0010): each checks for a platform admin in the database.
+FUNCTIONS = (
+    "tenancy.admin_register_pack_version(text, text, jsonb, text)",
+    "tenancy.admin_set_pack_status(text, text, text)",
+    "iam.admin_list_platform_admins()",
+    "iam.admin_grant_platform_admin(uuid)",
+    "iam.admin_revoke_platform_admin(uuid)",
+)
 ROLE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 TABLES = text(
     "SELECT n.nspname || '.' || c.relname FROM pg_catalog.pg_class c "
@@ -61,6 +69,11 @@ async def run(command: str, role: str) -> int:
             ):
                 sys.exit(f"✗ No role {role!r}. Create it first (see --help).")
             tables = (await connection.execute(TABLES, {"schemas": list(SCHEMAS)})).scalars().all()
+            functions = [
+                f
+                for f in FUNCTIONS
+                if await connection.scalar(text("SELECT to_regprocedure(:f)"), {"f": f})
+            ]
             if command == "grant":
                 # The role name is validated above; identifiers can't be bound parameters.
                 for schema in SCHEMAS:
@@ -68,7 +81,13 @@ async def run(command: str, role: str) -> int:
                 for table in tables:
                     rights = "SELECT" if table in READ_ONLY else "SELECT, INSERT, UPDATE, DELETE"
                     await connection.execute(text(f'GRANT {rights} ON {table} TO "{role}"'))
+                for function in functions:
+                    await connection.execute(
+                        text(f'GRANT EXECUTE ON FUNCTION {function} TO "{role}"')
+                    )
                 print(f"✓ {role} may use {len(tables)} tables, under row-level security.")
+                if len(functions) < len(FUNCTIONS):
+                    print("  Platform admin functions are missing: run `alembic upgrade head`.")
                 return 0
             missing = [
                 table
@@ -82,6 +101,15 @@ async def run(command: str, role: str) -> int:
                         if table in READ_ONLY
                         else "SELECT, INSERT, UPDATE, DELETE",
                     },
+                )
+            ]
+            ungranted = [
+                f.split("(")[0]
+                for f in FUNCTIONS
+                if f not in functions
+                or not await connection.scalar(
+                    text("SELECT has_function_privilege(:role, :f, 'EXECUTE')"),
+                    {"role": role, "f": f},
                 )
             ]
             writable = [
@@ -109,8 +137,12 @@ async def run(command: str, role: str) -> int:
         f"{'✗' if writable else '✓'} platform tables read-only"
         + (f" (writable: {', '.join(writable)})" if writable else "")
     )
+    print(
+        f"{'✗' if ungranted else '✓'} platform admin functions"
+        + (f" missing: {', '.join(ungranted)} (migrate, then grant)" if ungranted else "")
+    )
     print(f"{'✗' if powerful else '✓'} superuser / bypasses RLS: {'yes' if powerful else 'no'}")
-    return 0 if not missing and not writable and not powerful else 1
+    return 0 if not missing and not writable and not ungranted and not powerful else 1
 
 
 def main() -> None:

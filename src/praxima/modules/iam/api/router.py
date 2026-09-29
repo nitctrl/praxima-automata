@@ -10,6 +10,7 @@ from praxima.entrypoints.http.deps import (
     LoginLimiter,
     OrganizationAccess,
     Paging,
+    PlatformAccess,
     SecureCookies,
     SelfSignup,
     Sessions,
@@ -18,7 +19,7 @@ from praxima.entrypoints.http.deps import (
     WorkspaceAccess,
 )
 from praxima.entrypoints.http.identity import register, sign_in, verify_password
-from praxima.entrypoints.http.responses import Page
+from praxima.entrypoints.http.responses import Page, PageInfo
 from praxima.entrypoints.http.sessions import COOKIE_NAME
 from praxima.modules import iam
 from praxima.modules.iam.api.schemas import (
@@ -26,6 +27,8 @@ from praxima.modules.iam.api.schemas import (
     MemberOut,
     MembershipOut,
     OrganizationRoleIn,
+    PlatformAdminIn,
+    PlatformAdminOut,
     Registration,
     RegistrationOut,
     SessionOut,
@@ -39,7 +42,10 @@ router = APIRouter()
 
 
 def _session_out(
-    csrf: str, principal: iam.Principal, memberships: list[iam.MembershipView]
+    csrf: str,
+    principal: iam.Principal,
+    memberships: list[iam.MembershipView],
+    platform_admin: bool,
 ) -> SessionOut:
     return SessionOut(
         csrf=csrf,
@@ -47,6 +53,7 @@ def _session_out(
             id=principal.user_id, email=principal.email, display_name=principal.display_name
         ),
         memberships=[MembershipOut.of(m) for m in memberships],
+        is_platform_admin=platform_admin,
     )
 
 
@@ -57,6 +64,7 @@ def _start_session(
     secure: bool,
     principal: iam.Principal,
     memberships: list[iam.MembershipView],
+    platform_admin: bool,
 ) -> SessionOut:
     store.delete(request.cookies.get(COOKIE_NAME, ""))  # no session fixation
     sid, web = store.create(principal.user_id, principal.email, principal.display_name)
@@ -69,7 +77,7 @@ def _start_session(
         samesite="strict",
         path="/api",
     )
-    return _session_out(web.csrf, principal, memberships)
+    return _session_out(web.csrf, principal, memberships, platform_admin)
 
 
 @router.post("/auth/session", tags=["auth"])
@@ -86,8 +94,8 @@ async def create_session(
     """Sign in with email and password. Sets an HttpOnly session cookie."""
     limiter.hit(request.client.host if request.client else "unknown")
     identity = await verify_password(gateway, body.email, body.password)
-    principal, memberships = await sign_in(sessions, identity)
-    return _start_session(request, response, store, secure, principal, memberships)
+    principal, memberships, admin = await sign_in(sessions, identity)
+    return _start_session(request, response, store, secure, principal, memberships, admin)
 
 
 @router.post("/auth/registrations", tags=["auth"], status_code=status.HTTP_201_CREATED)
@@ -113,10 +121,10 @@ async def create_registration(
     identity = await register(gateway, body.email, body.password, body.display_name.strip())
     if identity is None:
         return RegistrationOut(status="confirmation_required")
-    principal, memberships = await sign_in(sessions, identity)
+    principal, memberships, admin = await sign_in(sessions, identity)
     return RegistrationOut(
         status="signed_in",
-        session=_start_session(request, response, store, secure, principal, memberships),
+        session=_start_session(request, response, store, secure, principal, memberships, admin),
     )
 
 
@@ -124,8 +132,9 @@ async def create_registration(
 async def read_session(user: CurrentUser, session: UserSession) -> SessionOut:
     """The current user and memberships (restores a session after a page reload)."""
     memberships = await iam.active_memberships(session, user.user_id)
+    admin = await iam.is_platform_admin(session, user.user_id)
     principal = iam.Principal(user.user_id, user.email, user.display_name)
-    return _session_out(user.csrf, principal, memberships)
+    return _session_out(user.csrf, principal, memberships, admin)
 
 
 @router.delete("/auth/session", tags=["auth"], status_code=status.HTTP_204_NO_CONTENT)
@@ -217,3 +226,25 @@ async def revoke_organization_role(user_id: uuid.UUID, access: OrganizationAcces
     await iam.revoke_membership_of(
         access.session, access.actor, organization_id=access.organization_id, user_id=user_id
     )
+
+
+@router.get("/platform/admins", tags=["platform"])
+async def list_platform_admins(access: PlatformAccess) -> Page[PlatformAdminOut]:
+    admins = [PlatformAdminOut.of(a) for a in await iam.platform_admins(access.session)]
+    return Page(data=admins, page=PageInfo(limit=len(admins), next_cursor=None))
+
+
+@router.post("/platform/admins", tags=["platform"], status_code=status.HTTP_201_CREATED)
+async def add_platform_admin(body: PlatformAdminIn, access: PlatformAccess) -> PlatformAdminOut:
+    """Make an existing account a platform admin (they must have signed in once)."""
+    user_id = await iam.grant_platform_admin(access.session, access.actor, body.email)
+    admins = await iam.platform_admins(access.session)
+    return PlatformAdminOut.of(next(a for a in admins if a.user_id == user_id))
+
+
+@router.delete(
+    "/platform/admins/{user_id}", tags=["platform"], status_code=status.HTTP_204_NO_CONTENT
+)
+async def remove_platform_admin(user_id: uuid.UUID, access: PlatformAccess) -> None:
+    """Never yourself, and never the last platform admin (409)."""
+    await iam.revoke_platform_admin(access.session, access.actor, user_id)

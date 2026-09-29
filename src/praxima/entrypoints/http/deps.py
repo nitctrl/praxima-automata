@@ -154,6 +154,25 @@ WorkspaceAccess = Annotated[Access, Depends(workspace_access, scope="function")]
 OrganizationAccess = Annotated[Access, Depends(organization_access, scope="function")]
 
 
+@dataclass(frozen=True)
+class Platform:
+    """A platform admin's unit of work (RLS lets them read every tenant's rows)."""
+
+    session: AsyncSession
+    actor: iam.Actor
+
+
+async def platform_access(user: CurrentUser, sessions: Sessions) -> AsyncIterator[Platform]:
+    """Only platform admins; anyone else gets 404, so the admin area isn't revealed."""
+    async with scoped_transaction(sessions, Scope(user_id=user.user_id)) as session:
+        if not await iam.is_platform_admin(session, user.user_id):
+            raise NotFound("Not found.")
+        yield Platform(session, iam.Actor(user.user_id, None, is_platform_admin=True))
+
+
+PlatformAccess = Annotated[Platform, Depends(platform_access, scope="function")]
+
+
 async def narrow_to_workspace(access: Access, workspace_id: uuid.UUID) -> Access:
     """Scope an organization-level unit of work to one of its workspaces (e.g. just created).
 

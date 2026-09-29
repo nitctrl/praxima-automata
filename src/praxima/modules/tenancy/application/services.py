@@ -1,15 +1,19 @@
 """Writes for organizations and workspaces: permission checks, validation, audit."""
 
+import asyncio
+import json
+import logging
 import uuid
 from dataclasses import dataclass, fields
 from typing import Any
 from zoneinfo import available_timezones
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from praxima.modules import audit
 from praxima.modules.iam import Actor, active_memberships, require, set_membership
+from praxima.modules.tenancy.application.selectors import shipped_pack
 from praxima.modules.tenancy.infrastructure.models import Organization, PackVersion, Workspace
 from praxima.shared.db.engine import Scope, apply_scope
 from praxima.shared.db.errors import translate_db_errors
@@ -21,6 +25,7 @@ from praxima.shared.errors import (
     ValidationFailed,
 )
 
+logger = logging.getLogger(__name__)
 _TIMEZONES = frozenset(available_timezones())
 
 
@@ -198,3 +203,54 @@ async def update_workspace(
         resource_id=workspace.id,
         change_diff={"fields": sorted(updates)},
     )
+
+
+# Platform admin writes go through owner-owned functions (migration 0010): the API's login
+# may only read the platform tables. Those functions check the admin again in the database.
+_REGISTER = text(
+    "SELECT tenancy.admin_register_pack_version(:key, :version, CAST(:manifest AS jsonb), :sum)"
+)
+_SET_STATUS = text("SELECT tenancy.admin_set_pack_status(:key, :version, :status)")
+
+
+async def register_shipped_pack(session: AsyncSession, actor: Actor, key: str) -> tuple[str, bool]:
+    """Register the shipped version of a pack: (version, newly registered?)."""
+    if not actor.is_platform_admin:
+        raise PermissionDenied()
+    pack = await asyncio.to_thread(shipped_pack, key)
+    with translate_db_errors():
+        outcome = await session.scalar(
+            _REGISTER,
+            {
+                "key": pack.key,
+                "version": pack.version,
+                "manifest": json.dumps(pack.payload()),
+                "sum": pack.checksum(),
+            },
+        )
+    if outcome == "conflict":
+        raise Conflict(
+            f"{pack.key} {pack.version} is already registered with different files. "
+            "Bump `version` in its manifest.yaml, then register again."
+        )
+    if outcome == "registered":
+        logger.info("Pack %s %s registered by %s", pack.key, pack.version, actor.user_id)
+    return pack.version, outcome == "registered"
+
+
+async def set_pack_status(
+    session: AsyncSession, actor: Actor, *, key: str, version: str, status: str
+) -> None:
+    """available: new workspaces may use it; deprecated/withdrawn: hidden from new ones.
+
+    Workspaces already on that version keep working either way.
+    """
+    if not actor.is_platform_admin:
+        raise PermissionDenied()
+    with translate_db_errors():
+        found = await session.scalar(
+            _SET_STATUS, {"key": key, "version": version, "status": status}
+        )
+    if not found:
+        raise NotFound("No such pack version.")
+    logger.info("Pack %s %s set to %s by %s", key, version, status, actor.user_id)

@@ -5,6 +5,8 @@ from fastapi import APIRouter, Response, status
 from praxima.entrypoints.http.deps import (
     CurrentUser,
     OrganizationAccess,
+    Paging,
+    PlatformAccess,
     SelfSignup,
     UserSession,
     WorkspaceAccess,
@@ -17,8 +19,14 @@ from praxima.modules.tenancy.api.schemas import (
     EntityLabelOut,
     OrganizationIn,
     OrganizationOut,
+    OrganizationSummaryOut,
+    PackCatalogOut,
     PackDetailsOut,
+    PackKey,
     PackOut,
+    PackRegistrationOut,
+    PackStatusIn,
+    PackVersionText,
     WorkspaceIn,
     WorkspaceOut,
     WorkspacePatch,
@@ -116,3 +124,54 @@ async def create_own_organization(
     )
     response.headers["Location"] = f"/api/v1/organizations/{organization_id}"
     return OrganizationOut(id=organization_id, slug=body.slug, name=body.name.strip())
+
+
+# Platform admin area: every tenant, so only platform admins (404 for anyone else).
+
+
+@router.get("/platform/packs", tags=["platform"])
+async def list_pack_catalog(access: PlatformAccess) -> Page[PackCatalogOut]:
+    """Shipped packs and their registered versions, with what needs attention."""
+    packs = [PackCatalogOut.of(p) for p in await tenancy.pack_catalog(access.session)]
+    return Page(data=packs, page=PageInfo(limit=len(packs), next_cursor=None))
+
+
+@router.post(
+    "/platform/packs/{key}/registrations",
+    tags=["platform"],
+    status_code=status.HTTP_201_CREATED,
+)
+async def register_pack(
+    key: PackKey, access: PlatformAccess, response: Response
+) -> PackRegistrationOut:
+    """Register the shipped version (201), or 200 if already registered with the same files."""
+    version, registered = await tenancy.register_shipped_pack(access.session, access.actor, key)
+    if not registered:
+        response.status_code = status.HTTP_200_OK
+    return PackRegistrationOut(key=key, version=version, registered=registered)
+
+
+@router.patch("/platform/packs/{key}/versions/{version}", tags=["platform"])
+async def update_pack_version(
+    key: PackKey, version: PackVersionText, body: PackStatusIn, access: PlatformAccess
+) -> PackCatalogOut:
+    """Make a version available to new workspaces, or deprecate / withdraw it."""
+    await tenancy.set_pack_status(
+        access.session, access.actor, key=key, version=version, status=body.status
+    )
+    entry = next(p for p in await tenancy.pack_catalog(access.session) if p.key == key)
+    return PackCatalogOut.of(entry)
+
+
+@router.get("/platform/organizations", tags=["platform"])
+async def list_all_organizations(
+    access: PlatformAccess, page: Paging
+) -> Page[OrganizationSummaryOut]:
+    """Every organization, newest first, with its workspaces and member count."""
+    result = await tenancy.organizations_page(access.session, page)
+    counts = await iam.member_counts(access.session, [o.id for o in result.items])
+    return Page.build(
+        result,
+        [OrganizationSummaryOut.of(o, counts.get(o.id, 0)) for o in result.items],
+        page.limit,
+    )

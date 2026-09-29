@@ -132,6 +132,7 @@ uv run python scripts/packs.py register    # register shipped domain packs (need
 uv run python scripts/check_database.py   # diagnose the /api/v1 database connection (never prints secrets)
 uv run python scripts/voice_runtime.py {grant|check} <role>   # voice worker login: release lookup + call records only
 uv run python scripts/api_role.py {grant|check} <role>        # API login: module tables under RLS (never a BYPASSRLS owner)
+uv run python scripts/platform_admin.py {grant|revoke|list} [email]   # first platform admin; then use the dashboard's Platform area
 uv run alembic upgrade head --sql         # print the SQL only (review / squawk), no database
 uv run alembic revision --autogenerate --rev-id 0002 -m "iam and tenancy"   # draft; review it
 
@@ -467,6 +468,9 @@ POST-for-everything) migrate to this. Change the backend and
 | POST | `/organizations` | ✅ create your first organization and become its owner (self-service only; RLS allows one per person) |
 | GET | `/workspaces` | ✅ every workspace the signed-in user belongs to |
 | GET | `/packs` | ✅ pack versions available to new workspaces |
+| GET / POST / PATCH | `/platform/packs`, `…/{key}/registrations`, `…/{key}/versions/{version}` | ✅ platform admins only (404 otherwise): shipped vs registered packs / register the shipped version (409 if files changed without a version bump) / set `available`, `deprecated` or `withdrawn` |
+| GET | `/platform/organizations` | ✅ every organization with its workspaces and member count (platform admins) |
+| GET, POST / DELETE | `/platform/admins[/{userId}]` | ✅ list / grant by email / revoke (409 for yourself); writes via SECURITY DEFINER functions (migration 0010) |
 | GET | `/workspaces/{wsId}/pack` | ✅ the installed pack's vocabulary: entry labels (singular/plural), document categories, live-update kinds, callback kind, starter agent wording |
 | POST | `/organizations/{orgId}/workspaces` | ✅ create a workspace and install its pack (admin+) |
 | GET | `/organizations/{orgId}/workspaces` | |

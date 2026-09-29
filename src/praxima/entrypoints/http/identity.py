@@ -94,8 +94,9 @@ async def register(
 
 async def sign_in(
     sessions: async_sessionmaker[AsyncSession], identity: iam.VerifiedIdentity
-) -> tuple[iam.Principal, list[iam.MembershipView]]:
-    """Resolve or provision the user, then read their memberships, in one transaction."""
+) -> tuple[iam.Principal, list[iam.MembershipView], bool]:
+    """Resolve or provision the user, then read their memberships and whether they're a
+    platform admin, in one transaction."""
     login_scope = Scope(
         identity_provider=identity.provider,
         identity_subject=identity.subject,
@@ -104,4 +105,8 @@ async def sign_in(
     async with scoped_transaction(sessions, login_scope) as session:
         principal = await iam.login(session, identity)
         await apply_scope(session, Scope(user_id=principal.user_id))
-        return principal, await iam.active_memberships(session, principal.user_id)
+        return (
+            principal,
+            await iam.active_memberships(session, principal.user_id),
+            await iam.is_platform_admin(session, principal.user_id),
+        )

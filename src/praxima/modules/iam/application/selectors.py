@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import ColumnElement, or_, select
+from sqlalchemy import ColumnElement, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -148,3 +148,49 @@ async def membership_id_for(
         )
     )
     return membership_id
+
+
+@dataclass(frozen=True)
+class PlatformAdminView:
+    user_id: uuid.UUID
+    email: str
+    display_name: str | None
+    granted_by: uuid.UUID | None
+    granted_at: datetime
+
+
+async def platform_admins(session: AsyncSession) -> list[PlatformAdminView]:
+    """Every platform admin (a SECURITY DEFINER function: RLS shows each only their own row)."""
+    rows = (
+        await session.execute(
+            text("SELECT user_id, granted_by, created_at FROM iam.admin_list_platform_admins()")
+        )
+    ).all()
+    users = {
+        u.id: u
+        for u in await session.scalars(select(User).where(User.id.in_([r.user_id for r in rows])))
+    }
+    return [
+        PlatformAdminView(
+            r.user_id,
+            users[r.user_id].email if r.user_id in users else "",
+            users[r.user_id].display_name if r.user_id in users else None,
+            r.granted_by,
+            r.created_at,
+        )
+        for r in rows
+    ]
+
+
+async def member_counts(
+    session: AsyncSession, organization_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, int]:
+    """People with an active membership in each organization (one query)."""
+    if not organization_ids:
+        return {}
+    rows = await session.execute(
+        select(Membership.organization_id, func.count(func.distinct(Membership.user_id)))
+        .where(Membership.organization_id.in_(organization_ids), Membership.status == "active")
+        .group_by(Membership.organization_id)
+    )
+    return {organization_id: count for organization_id, count in rows.tuples()}

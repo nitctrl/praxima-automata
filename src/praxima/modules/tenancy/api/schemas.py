@@ -1,7 +1,8 @@
 """Request and response models for workspace endpoints."""
 
 import uuid
-from typing import Annotated
+from datetime import datetime
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -117,3 +118,96 @@ class PackDetailsOut(BaseModel):
     announcement_kinds: list[str]
     callback_kind: str | None
     agent_defaults: AgentDefaultsOut | None
+
+
+# Platform admin area.
+PackKey = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,62}$")]
+PackVersionText = Annotated[str, Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$", max_length=20)]
+
+
+class PackVersionAdminOut(BaseModel):
+    version: str
+    status: str
+    released_at: datetime
+
+
+class PackCatalogOut(BaseModel):
+    """A shipped or registered pack. Organizations see only `available` versions."""
+
+    key: str
+    name: str
+    industry: str
+    shipped_version: str | None
+    shipped_invalid: bool
+    needs_registration: bool
+    files_changed_without_bump: bool
+    versions: list[PackVersionAdminOut]
+
+    @classmethod
+    def of(cls, entry: tenancy.PackCatalogEntry) -> "PackCatalogOut":
+        return cls(
+            key=entry.key,
+            name=entry.name,
+            industry=entry.industry,
+            shipped_version=entry.shipped_version,
+            shipped_invalid=entry.shipped_invalid,
+            needs_registration=entry.needs_registration,
+            files_changed_without_bump=entry.files_changed_without_bump,
+            versions=[
+                PackVersionAdminOut(version=v.version, status=v.status, released_at=v.released_at)
+                for v in entry.versions
+            ],
+        )
+
+
+class PackRegistrationOut(BaseModel):
+    key: str
+    version: str
+    registered: bool  # false: this version was already registered with the same files
+
+
+class PackStatusIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["available", "deprecated", "withdrawn"]
+
+
+class OrganizationWorkspaceOut(BaseModel):
+    id: uuid.UUID
+    slug: str
+    name: str
+    pack_key: str
+    pack_version: str
+    status: str
+
+
+class OrganizationSummaryOut(BaseModel):
+    id: uuid.UUID
+    slug: str
+    name: str
+    status: str
+    created_at: datetime
+    member_count: int
+    workspaces: list[OrganizationWorkspaceOut]
+
+    @classmethod
+    def of(cls, org: tenancy.OrganizationSummary, member_count: int) -> "OrganizationSummaryOut":
+        return cls(
+            id=org.id,
+            slug=org.slug,
+            name=org.name,
+            status=org.status,
+            created_at=org.created_at,
+            member_count=member_count,
+            workspaces=[
+                OrganizationWorkspaceOut(
+                    id=w.id,
+                    slug=w.slug,
+                    name=w.name,
+                    pack_key=w.pack_key,
+                    pack_version=w.pack_version,
+                    status=w.status,
+                )
+                for w in org.workspaces
+            ],
+        )

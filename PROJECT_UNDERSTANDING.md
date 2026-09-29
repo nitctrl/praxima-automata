@@ -495,6 +495,12 @@ for RLS policies, triggers and partitions, and `alembic check` must show no drif
   - `APP_API_DATABASE_URL` is the API's connection. Without it, `/api/v1` answers 503.
   - It must be a restricted login (`scripts/api_role.py grant <role>`). `main.py` refuses to
     start with a superuser or BYPASSRLS login, which would show every tenant's rows to everyone.
+- **Platform admins** (`iam.platform_admins`) use the console's Platform area and
+  `/api/v1/platform/*`: register shipped packs, set a pack version `available` / `deprecated` /
+  `withdrawn` (only `available` ones are offered to organizations), list every organization,
+  and grant or revoke platform admins. The API login can only read those platform tables, so
+  writes go through admin-only SECURITY DEFINER functions (migration 0010, granted by
+  `scripts/api_role.py`). The first admin comes from `scripts/platform_admin.py grant <email>`.
 
 ### 9.4 API conventions
 

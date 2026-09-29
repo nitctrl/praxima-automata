@@ -1,9 +1,10 @@
 """Writes for identity and access: login provisioning and membership changes."""
 
+import logging
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from praxima.modules import audit
@@ -23,7 +24,9 @@ from praxima.modules.iam.domain.rules import (
 from praxima.modules.iam.infrastructure.models import Identity, Membership, User
 from praxima.shared.db.base import utc_now
 from praxima.shared.db.errors import translate_db_errors
-from praxima.shared.errors import NotFound, PermissionDenied, ValidationFailed
+from praxima.shared.errors import Conflict, NotFound, PermissionDenied, ValidationFailed
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -179,3 +182,36 @@ async def revoke_membership_of(
     await revoke_membership(
         session, actor, organization_id=organization_id, membership_id=membership_id
     )
+
+
+# Owner-owned functions (migration 0010); they check the platform admin again in the database.
+_GRANT_ADMIN = text("SELECT iam.admin_grant_platform_admin(:user_id)")
+_REVOKE_ADMIN = text("SELECT iam.admin_revoke_platform_admin(:user_id)")
+
+
+async def grant_platform_admin(session: AsyncSession, actor: Actor, email: str) -> uuid.UUID:
+    """Make an existing account a platform admin (idempotent). Returns their user id."""
+    if not actor.is_platform_admin:
+        raise PermissionDenied()
+    user = await user_by_email(session, email.strip())
+    if user is None:
+        raise NotFound("No account with that email. They need to sign up or sign in once first.")
+    with translate_db_errors():
+        granted = await session.scalar(_GRANT_ADMIN, {"user_id": user.id})
+    if granted:
+        logger.info("Platform admin granted to %s by %s", user.id, actor.user_id)
+    return user.id
+
+
+async def revoke_platform_admin(session: AsyncSession, actor: Actor, user_id: uuid.UUID) -> None:
+    if not actor.is_platform_admin:
+        raise PermissionDenied()
+    with translate_db_errors():
+        outcome = await session.scalar(_REVOKE_ADMIN, {"user_id": user_id})
+    if outcome == "self":
+        raise Conflict("You can't remove your own platform admin access.")
+    if outcome == "last":
+        raise Conflict("Keep at least one platform admin.")
+    if outcome == "missing":
+        raise NotFound("That person isn't a platform admin.")
+    logger.info("Platform admin revoked from %s by %s", user_id, actor.user_id)

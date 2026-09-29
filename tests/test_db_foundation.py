@@ -250,3 +250,8 @@ def test_api_role_script_covers_every_table_schema():
     with_tables = {table.schema for table in Base.metadata.tables.values()} - {"ops"}
     assert with_tables <= set(script.SCHEMAS) <= set(MODULE_SCHEMAS)
     assert all(name.split(".")[0] in script.SCHEMAS for name in script.READ_ONLY)
+    migrations = "".join(p.read_text() for p in (ROOT / "db/migrations/versions").glob("*.py"))
+    for function in script.FUNCTIONS:  # granted functions exist and are closed to PUBLIC
+        name = function.split("(")[0]
+        assert f"CREATE FUNCTION {name}(" in migrations
+        assert f"REVOKE ALL ON FUNCTION {name}(" in migrations

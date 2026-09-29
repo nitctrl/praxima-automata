@@ -56,6 +56,7 @@ class SessionOut(BaseModel):
     csrf: str
     user: UserOut
     memberships: list[MembershipOut]
+    is_platform_admin: bool = False  # may open the platform admin area
 
 
 class RegistrationOut(BaseModel):
@@ -94,3 +95,25 @@ class GrantOut(BaseModel):
     organization_id: uuid.UUID
     workspace_id: uuid.UUID | None
     role: str
+
+
+class PlatformAdminIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+$")
+
+
+class PlatformAdminOut(BaseModel):
+    user_id: uuid.UUID
+    email: str
+    display_name: str | None
+    granted_at: datetime
+
+    @classmethod
+    def of(cls, view: iam.PlatformAdminView) -> "PlatformAdminOut":
+        return cls(
+            user_id=view.user_id,
+            email=view.email,
+            display_name=view.display_name,
+            granted_at=view.granted_at,
+        )
