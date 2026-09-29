@@ -49,6 +49,12 @@ async def check(url: str) -> int:
         async with engine.connect() as connection:
             user = await connection.scalar(text("SELECT current_user"))
             ready = await connection.scalar(text("SELECT to_regclass('iam.users') IS NOT NULL"))
+            powerful = await connection.scalar(
+                text(
+                    "SELECT rolsuper OR rolbypassrls FROM pg_catalog.pg_roles "
+                    "WHERE rolname = current_user"
+                )
+            )
             revision = (
                 await connection.scalar(text("SELECT version_num FROM ops.alembic_version"))
                 if await connection.scalar(
@@ -67,6 +73,13 @@ async def check(url: str) -> int:
     finally:
         await engine.dispose()
     print(f"✓ Connected as {user}.")
+    if powerful:
+        print(
+            f"✗ {user} bypasses row-level security: every user would see every organization, "
+            "and the API refuses to start. Use a restricted login: "
+            "uv run python scripts/api_role.py grant <role>"
+        )
+        return 1
     if not ready:
         print("✗ The new schema is missing: run `uv run alembic upgrade head`.")
         return 1

@@ -493,6 +493,8 @@ for RLS policies, triggers and partitions, and `alembic check` must show no drif
 - **Database credentials:**
   - `DB_OWNER_DATABASE_URL` is used only by Alembic.
   - `APP_API_DATABASE_URL` is the API's connection. Without it, `/api/v1` answers 503.
+  - It must be a restricted login (`scripts/api_role.py grant <role>`). `main.py` refuses to
+    start with a superuser or BYPASSRLS login, which would show every tenant's rows to everyone.
 
 ### 9.4 API conventions
 

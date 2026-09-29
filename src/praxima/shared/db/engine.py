@@ -5,7 +5,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
+from sqlalchemy import create_engine as create_sync_engine
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -17,6 +19,9 @@ from sqlalchemy.pool import NullPool
 from praxima.shared.db.settings import ConfigurationError
 
 _SET = text("SELECT set_config(:name, :value, true)")
+_POWERFUL = text(
+    "SELECT rolsuper OR rolbypassrls FROM pg_catalog.pg_roles WHERE rolname = current_user"
+)
 
 
 @dataclass(frozen=True)
@@ -73,6 +78,26 @@ def create_engine(url: str, *, pool_size: int = 5, pooled: bool = True) -> Async
     if not pooled:
         return create_async_engine(url, poolclass=NullPool, hide_parameters=True)
     return create_async_engine(url, pool_size=pool_size, pool_pre_ping=True, hide_parameters=True)
+
+
+def bypasses_rls(url: str) -> bool | None:
+    """Whether this login skips row-level security (superuser or BYPASSRLS); None if unreachable.
+
+    Such a login sees every tenant's rows, so the API must never serve with one.
+    """
+    engine = create_sync_engine(
+        normalize_url(url),
+        poolclass=NullPool,
+        hide_parameters=True,
+        connect_args={"connect_timeout": 5},
+    )
+    try:
+        with engine.connect() as connection:
+            return bool(connection.scalar(_POWERFUL))
+    except DBAPIError:
+        return None
+    finally:
+        engine.dispose()
 
 
 def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:

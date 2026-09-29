@@ -1,6 +1,7 @@
 """SQLAlchemy base, tenant scoping and Alembic foundation (ADR 0001)."""
 
 import asyncio
+import importlib.util
 import io
 import os
 import time
@@ -24,7 +25,13 @@ from praxima.shared.db.base import (
     IdMixin,
     TenantMixin,
 )
-from praxima.shared.db.engine import Scope, create_engine, normalize_url, tenant_transaction
+from praxima.shared.db.engine import (
+    Scope,
+    bypasses_rls,
+    create_engine,
+    normalize_url,
+    tenant_transaction,
+)
 from praxima.shared.db.registry import import_models
 from praxima.shared.db.settings import ConfigurationError
 from praxima.shared.kernel.ids import new_id
@@ -217,3 +224,29 @@ def test_optional_json_columns_store_sql_null():
         for column in table.columns:
             if isinstance(column.type, JSONB) and column.nullable:
                 assert column.type.none_as_null, f"{table.fullname}.{column.name}"
+
+
+def test_rls_bypass_check_is_unknown_when_unreachable():
+    # Startup goes on (v1 answers 503 until the database is back); nothing is guessed.
+    assert bypasses_rls("postgresql://nobody@127.0.0.1:1/none") is None
+
+
+@pytest.mark.skipif(
+    not os.environ.get("PRAXIMA_TEST_DATABASE_URL"),
+    reason="Set PRAXIMA_TEST_DATABASE_URL to a disposable database on an external Postgres.",
+)
+def test_rls_bypass_check_against_real_postgres():
+    # The test login is the (non-superuser) owner, and FORCE RLS applies to it.
+    assert bypasses_rls(os.environ["PRAXIMA_TEST_DATABASE_URL"]) is False
+
+
+def test_api_role_script_covers_every_table_schema():
+    """scripts/api_role.py grants each module schema that has tables (ops stays owner-only)."""
+    spec = importlib.util.spec_from_file_location("api_role", ROOT / "scripts/api_role.py")
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    import_models()
+    with_tables = {table.schema for table in Base.metadata.tables.values()} - {"ops"}
+    assert with_tables <= set(script.SCHEMAS) <= set(MODULE_SCHEMAS)
+    assert all(name.split(".")[0] in script.SCHEMAS for name in script.READ_ONLY)

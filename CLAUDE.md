@@ -97,6 +97,8 @@ Breaking any of these is a bug, even if the tests pass.
   PostgREST/RLS). **Target:** `db_owner` (migrations), `app_api`, `app_agent_runtime`
   (read-only releases; writes only via `SECURITY DEFINER` functions), `app_worker`,
   `app_readonly`. No `BYPASSRLS` or superuser at runtime.
+  The API refuses to start when `APP_API_DATABASE_URL` bypasses RLS (`main.py`,
+  `shared.db.engine.bypasses_rls`); `scripts/api_role.py` sets up its restricted login.
 - The API never uses owner or service-role credentials.
 
 **Dashboard API security** (keep all of it through every refactor)
@@ -129,6 +131,7 @@ uv run alembic upgrade head               # apply new-schema revisions (DB_OWNER
 uv run python scripts/packs.py register    # register shipped domain packs (needed before creating workspaces)
 uv run python scripts/check_database.py   # diagnose the /api/v1 database connection (never prints secrets)
 uv run python scripts/voice_runtime.py {grant|check} <role>   # voice worker login: release lookup + call records only
+uv run python scripts/api_role.py {grant|check} <role>        # API login: module tables under RLS (never a BYPASSRLS owner)
 uv run alembic upgrade head --sql         # print the SQL only (review / squawk), no database
 uv run alembic revision --autogenerate --rev-id 0002 -m "iam and tenancy"   # draft; review it
 

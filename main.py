@@ -15,7 +15,7 @@ from praxima.entrypoints.api import WebSettings, create_app
 from praxima.integrations.llm.gemini import gemini_answerer
 from praxima.modules.engagement import Vault
 from praxima.modules.knowledge.infrastructure.qdrant_index import QdrantKnowledgeIndex
-from praxima.shared.db.engine import create_engine, session_factory
+from praxima.shared.db.engine import bypasses_rls, create_engine, session_factory
 from praxima.shared.db.settings import ConfigurationError
 
 ROOT = Path(__file__).resolve().parent
@@ -71,6 +71,14 @@ def build_app() -> FastAPI:
             api_sessions = session_factory(create_engine(os.environ["APP_API_DATABASE_URL"]))
         except ConfigurationError:
             raise SystemExit("APP_API_DATABASE_URL must be a postgresql:// URL.") from None
+        # A superuser or BYPASSRLS login (e.g. Supabase's `postgres`) would show every tenant's
+        # data to everyone. Unreachable → start anyway; /api/v1 answers 503 until it's back.
+        if bypasses_rls(os.environ["APP_API_DATABASE_URL"]):
+            raise SystemExit(
+                "APP_API_DATABASE_URL logs in as a role that bypasses row-level security, so "
+                "every user would see every organization. Use a restricted login instead: "
+                "uv run python scripts/api_role.py grant <role>"
+            )
     # Semantic knowledge search when Qdrant + fastembed are available; else keywords only.
     knowledge_index = QdrantKnowledgeIndex.from_environment()
     # CRM personal data needs encryption and lookup keys; without them those endpoints 503.
