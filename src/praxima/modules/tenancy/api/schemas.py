@@ -27,6 +27,7 @@ class WorkspaceOut(BaseModel):
     supported_languages: list[str]
     status: str
     row_version: int
+    organization_status: str  # "suspended": members can't use it until reactivated
 
     @classmethod
     def of(cls, view: tenancy.WorkspaceView) -> "WorkspaceOut":
@@ -106,6 +107,13 @@ class AgentDefaultsOut(BaseModel):
     fallback_message: str
 
 
+class PackUpgradeOut(BaseModel):
+    """A newer available version of the installed pack; `problems` empty = can upgrade."""
+
+    version: str
+    problems: list[str]
+
+
 class PackDetailsOut(BaseModel):
     """The workspace's domain pack vocabulary, so UIs never hard-code an industry."""
 
@@ -118,6 +126,14 @@ class PackDetailsOut(BaseModel):
     announcement_kinds: list[str]
     callback_kind: str | None
     agent_defaults: AgentDefaultsOut | None
+    upgrades: list[PackUpgradeOut]
+
+
+class PackUpgradeIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: str = Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$", max_length=20)
+    row_version: int = Field(ge=1)
 
 
 # Platform admin area.
@@ -211,3 +227,9 @@ class OrganizationSummaryOut(BaseModel):
                 for w in org.workspaces
             ],
         )
+
+
+class OrganizationStatusIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["active", "suspended"]

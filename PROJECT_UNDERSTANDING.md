@@ -501,6 +501,14 @@ for RLS policies, triggers and partitions, and `alembic check` must show no drif
   and grant or revoke platform admins. The API login can only read those platform tables, so
   writes go through admin-only SECURITY DEFINER functions (migration 0010, granted by
   `scripts/api_role.py`). The first admin comes from `scripts/platform_admin.py grant <email>`.
+- **Suspending an organization** (`PATCH /platform/organizations/{id}`): its members get 403
+  on every workspace and organization endpoint (`deps._authorize`), `WorkspaceOut` carries
+  `organization_status`, and `releases.live_release_for_number` answers
+  `organization_inactive` (migration 0011), so calls hear "unavailable". Nothing is deleted.
+- **Upgrading a workspace's pack** (`POST /workspaces/{id}/pack-upgrades`, admin+): only to a
+  newer `available` version that passes `tenancy.upgrade_problems`. It may add types, kinds and
+  links and change wording, but may not remove anything or change a schema without a new
+  `schema_version`. The new version's types are installed; existing rows keep theirs.
 
 ### 9.4 API conventions
 

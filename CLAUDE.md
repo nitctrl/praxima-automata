@@ -468,6 +468,8 @@ POST-for-everything) migrate to this. Change the backend and
 | POST | `/organizations` | ✅ create your first organization and become its owner (self-service only; RLS allows one per person) |
 | GET | `/workspaces` | ✅ every workspace the signed-in user belongs to |
 | GET | `/packs` | ✅ pack versions available to new workspaces |
+| POST | `/workspaces/{wsId}/pack-upgrades` | ✅ move to a newer compatible pack version `{version, row_version}` (admin+); installs what it adds; `GET …/pack` lists `upgrades` with any `problems` |
+| PATCH | `/platform/organizations/{orgId}` | ✅ `{status: active|suspended}`: suspended = members get 403, calls hear "unavailable" (migration 0011); platform admins keep access |
 | GET / POST / PATCH | `/platform/packs`, `…/{key}/registrations`, `…/{key}/versions/{version}` | ✅ platform admins only (404 otherwise): shipped vs registered packs / register the shipped version (409 if files changed without a version bump) / set `available`, `deprecated` or `withdrawn` |
 | GET | `/platform/organizations` | ✅ every organization with its workspaces and member count (platform admins) |
 | GET, POST / DELETE | `/platform/admins[/{userId}]` | ✅ list / grant by email / revoke (409 for yourself); writes via SECURITY DEFINER functions (migration 0010) |

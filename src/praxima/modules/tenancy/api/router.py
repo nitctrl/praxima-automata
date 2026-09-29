@@ -1,5 +1,7 @@
 """Workspace endpoints. No business logic or queries here."""
 
+import uuid
+
 from fastapi import APIRouter, Response, status
 
 from praxima.entrypoints.http.deps import (
@@ -19,6 +21,7 @@ from praxima.modules.tenancy.api.schemas import (
     EntityLabelOut,
     OrganizationIn,
     OrganizationOut,
+    OrganizationStatusIn,
     OrganizationSummaryOut,
     PackCatalogOut,
     PackDetailsOut,
@@ -26,6 +29,8 @@ from praxima.modules.tenancy.api.schemas import (
     PackOut,
     PackRegistrationOut,
     PackStatusIn,
+    PackUpgradeIn,
+    PackUpgradeOut,
     PackVersionText,
     WorkspaceIn,
     WorkspaceOut,
@@ -83,7 +88,28 @@ async def read_workspace_pack(access: WorkspaceAccess) -> PackDetailsOut:
         agent_defaults=AgentDefaultsOut(**pack.agent_defaults.model_dump())
         if pack.agent_defaults
         else None,
+        upgrades=[
+            PackUpgradeOut(version=u.version, problems=u.problems)
+            for u in await tenancy.pack_upgrades(access.session, access.workspace_id)
+        ],
     )
+
+
+@router.post("/workspaces/{workspace_id}/pack-upgrades")
+async def upgrade_workspace_pack(body: PackUpgradeIn, access: WorkspaceAccess) -> WorkspaceOut:
+    """Move to a newer compatible version of the installed pack and install what it adds
+    (admin+). Existing entries and requests keep their schema; new ones use the newest."""
+    assert access.workspace_id is not None
+    await tenancy.upgrade_workspace_pack(
+        access.session,
+        access.actor,
+        workspace_id=access.workspace_id,
+        version=body.version,
+        row_version=body.row_version,
+    )
+    await catalog.install_pack(access.session, access.actor, access.workspace_id)
+    await engagement.install_work_item_kinds(access.session, access.actor, access.workspace_id)
+    return WorkspaceOut.of(await tenancy.get_workspace(access.session, access.workspace_id))
 
 
 @router.get("/packs")
@@ -175,3 +201,16 @@ async def list_all_organizations(
         [OrganizationSummaryOut.of(o, counts.get(o.id, 0)) for o in result.items],
         page.limit,
     )
+
+
+@router.patch("/platform/organizations/{organization_id}", tags=["platform"])
+async def update_organization_status(
+    organization_id: uuid.UUID, body: OrganizationStatusIn, access: PlatformAccess
+) -> OrganizationSummaryOut:
+    """Suspend (members get 403, calls hear "unavailable") or reactivate an organization."""
+    await tenancy.set_organization_status(
+        access.session, access.actor, organization_id=organization_id, status=body.status
+    )
+    summary = await tenancy.organization_summary(access.session, organization_id)
+    counts = await iam.member_counts(access.session, [organization_id])
+    return OrganizationSummaryOut.of(summary, counts.get(organization_id, 0))

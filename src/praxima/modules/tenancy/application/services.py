@@ -13,8 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praxima.modules import audit
 from praxima.modules.iam import Actor, active_memberships, require, set_membership
-from praxima.modules.tenancy.application.selectors import shipped_pack
+from praxima.modules.tenancy.application.selectors import (
+    installed_pack,
+    shipped_pack,
+    upgrade_problems,
+    version_key,
+)
 from praxima.modules.tenancy.infrastructure.models import Organization, PackVersion, Workspace
+from praxima.packs.loader import Pack
 from praxima.shared.db.engine import Scope, apply_scope
 from praxima.shared.db.errors import translate_db_errors
 from praxima.shared.errors import (
@@ -254,3 +260,85 @@ async def set_pack_status(
     if not found:
         raise NotFound("No such pack version.")
     logger.info("Pack %s %s set to %s by %s", key, version, status, actor.user_id)
+
+
+async def upgrade_workspace_pack(
+    session: AsyncSession,
+    actor: Actor,
+    *,
+    workspace_id: uuid.UUID,
+    version: str,
+    row_version: int,
+) -> None:
+    """Move the workspace to a newer available version of its pack.
+
+    Only compatible versions (see `upgrade_problems`). The caller then installs the new
+    version's entity types and work item kinds; existing data keeps its schema version.
+    """
+    require(actor, "packs:install")
+    workspace = await session.get(Workspace, workspace_id)
+    if workspace is None or workspace.deleted_at is not None:
+        raise NotFound("Workspace not found.")
+    if workspace.row_version != row_version:
+        raise Conflict("This workspace was changed by someone else. Reload and try again.")
+    target = await session.get(PackVersion, (workspace.pack_key, version))
+    if target is None or target.status != "available":
+        raise ValidationFailed(errors=[FieldError("version", "Pack version unavailable.")])
+    if version_key(version) <= version_key(workspace.pack_version):
+        raise ValidationFailed(
+            errors=[FieldError("version", "Choose a newer version than the installed one.")]
+        )
+    current = await installed_pack(session, workspace_id)
+    if problems := upgrade_problems(current, Pack.from_payload(target.manifest)):
+        raise ValidationFailed(
+            f"Version {version} isn't compatible with this workspace's data. " + " ".join(problems)
+        )
+    previous = workspace.pack_version
+    workspace.pack_version = version
+    workspace.updated_by = actor.user_id
+    with translate_db_errors():
+        await session.flush()
+    await audit.record(
+        session,
+        organization_id=workspace.organization_id,
+        workspace_id=workspace.id,
+        actor_id=actor.user_id,
+        action="pack.upgrade",
+        resource_type="workspace",
+        resource_id=workspace.id,
+        change_diff={"pack": workspace.pack_key, "from": previous, "to": version},
+    )
+
+
+async def set_organization_status(
+    session: AsyncSession, actor: Actor, *, organization_id: uuid.UUID, status: str
+) -> None:
+    """Platform admins suspend or reactivate an organization.
+
+    Suspended: its members get 403 on every workspace and organization endpoint, and calls
+    to its numbers hear that information is unavailable (releases.live_release_for_number).
+    Nothing is deleted; reactivating restores everything.
+    """
+    if not actor.is_platform_admin:
+        raise PermissionDenied()
+    # organizations_update RLS: only the scoped organization.
+    await apply_scope(session, Scope(user_id=actor.user_id, organization_id=organization_id))
+    organization = await session.get(Organization, organization_id)
+    if organization is None or organization.deleted_at is not None:
+        raise NotFound("Organization not found.")
+    if organization.status == status:
+        return
+    previous = organization.status
+    organization.status = status
+    organization.updated_by = actor.user_id
+    with translate_db_errors():
+        await session.flush()
+    await audit.record(
+        session,
+        organization_id=organization_id,
+        actor_id=actor.user_id,
+        action=f"organization.{'suspend' if status == 'suspended' else 'reactivate'}",
+        resource_type="organization",
+        resource_id=organization_id,
+        change_diff={"status": {"from": previous, "to": status}},
+    )

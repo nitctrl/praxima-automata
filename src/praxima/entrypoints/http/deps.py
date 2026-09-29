@@ -123,6 +123,11 @@ async def _authorize(
     admin = await iam.is_platform_admin(session, user_id)
     if role is None and not admin:
         raise NotFound(missing)  # never reveal that another tenant's resource exists
+    # Platform admins keep access to a suspended organization, to support it.
+    if not admin and await tenancy.organization_status(session, organization_id) == "suspended":
+        raise PermissionDenied(
+            "This organization is suspended. Contact the platform team to reactivate it."
+        )
     await apply_scope(
         session, Scope(user_id=user_id, organization_id=organization_id, workspace_id=workspace_id)
     )
