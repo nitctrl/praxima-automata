@@ -147,5 +147,49 @@ def test_unknown_number_gets_no_clinic_knowledge(monkeypatch, tmp_path):
     destination = InboundDestination("+918000000009", "ST_unknown")
     knowledge = asyncio.run(agent_knowledge.load_agent_knowledge(tmp_path, destination))
     assert knowledge.snapshot is None
+    assert knowledge.failure == "not_configured"
     result = asyncio.run(knowledge.search_clinic_knowledge("who are the doctors"))
     assert result["status"] == "unavailable"
+
+
+def test_plan_limit_is_reported_as_busy(monkeypatch, tmp_path):
+    from clinic.calls import CallLimitReached
+
+    def limited(destination):
+        raise CallLimitReached("Clinic call limit reached")
+
+    patch_database(monkeypatch, limited)
+    destination = InboundDestination("+918000000002", "ST_clinicB")
+    knowledge = asyncio.run(agent_knowledge.load_agent_knowledge(tmp_path, destination))
+    assert knowledge.failure == "busy"
+
+
+def test_database_outage_is_reported_as_unavailable(monkeypatch, tmp_path):
+    def outage(destination):
+        raise OSError("connection refused")
+
+    patch_database(monkeypatch, outage)
+    destination = InboundDestination("+918000000002", "ST_clinicB")
+    knowledge = asyncio.run(agent_knowledge.load_agent_knowledge(tmp_path, destination))
+    assert knowledge.failure == "unavailable"
+
+
+def test_console_without_a_configured_clinic_gets_nothing(monkeypatch, tmp_path):
+    monkeypatch.delenv("CONSOLE_CLINIC_ID", raising=False)
+    patch_database(monkeypatch, lambda destination: None)
+    knowledge = asyncio.run(agent_knowledge.load_agent_knowledge(tmp_path))
+    assert knowledge.snapshot is None
+    assert knowledge.failure == "not_configured"
+
+
+def test_database_url_prefers_the_process_environment(monkeypatch, tmp_path):
+    (tmp_path / ".env.runtime").write_text("DATABASE_URL=postgresql://file\n")
+    seen = []
+    monkeypatch.setattr(
+        DatabaseSettings, "validate", staticmethod(lambda dsn, project: seen.append(dsn))
+    )
+    monkeypatch.setenv("DATABASE_URL", "postgresql://env")
+    agent_knowledge.database_settings(tmp_path)
+    monkeypatch.delenv("DATABASE_URL")
+    agent_knowledge.database_settings(tmp_path)
+    assert seen == ["postgresql://env", "postgresql://file"]

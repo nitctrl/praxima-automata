@@ -1,17 +1,11 @@
-import asyncio
-import copy
-import inspect
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from uuid import UUID
 
 import pytest
-from livekit.agents.llm import find_function_tools
 from pydantic import ValidationError
 
 from clinic.knowledge import MAXIMUM_OFFERED_SLOTS, Query, StructuredKnowledge
-from clinic.resolver import ClinicScope
 from clinic.snapshot import Snapshot, normalize
-from clinic.tools import ClinicTools
 
 
 def uid(number):
@@ -188,6 +182,15 @@ def test_slot_times_are_capped_for_a_phone_caller(content):
     assert len(engine(content).slot_times(hours, set())) == MAXIMUM_OFFERED_SLOTS
 
 
+def test_slot_grid_stays_anchored_when_past_slots_are_skipped(content):
+    content["slot_minutes"] = 30
+    service = engine(content)
+    hours = [{"start": "2026-09-21T09:00:00+05:30", "end": "2026-09-21T11:00:00+05:30"}]
+    now = datetime.fromisoformat("2026-09-21T09:40:00+05:30")
+    # The grid is never shifted to 09:40/10:10; slots already started are dropped.
+    assert service.slot_times(hours, set(), not_before=now) == ["10:00", "10:30"]
+
+
 @pytest.mark.parametrize("doctor", [None, uid(2)])
 def test_clinic_closure_or_doctor_leave_overrides_weekly(content, doctor):
     content["schedule_exceptions"] = [exception(doctor)]
@@ -304,45 +307,6 @@ def test_query_validation(args):
         Query.model_validate(args)
 
 
-def make_tools(content, loader=None):
-    class Loader:
-        async def load(self):
-            return copy.deepcopy(content)
-
-    scope = ClinicScope(
-        UUID(uid(1)), UUID(uid(7)), UUID(uid(8)), "Asia/Kolkata", ("hi-IN", "en-IN")
-    )
-    return ClinicTools(
-        loader or Loader(), scope, clock=lambda: datetime(2026, 9, 21, 5, tzinfo=timezone.utc)
-    )
-
-
-def test_livekit_discovery_and_actual_tool_calls(content):
-    tools = make_tools(content)
-    discovered = find_function_tools(tools)
-    assert len(discovered) == 7
-    for tool in discovered:
-        assert "clinic_id" not in inspect.signature(tool).parameters
-        assert "configuration_version_id" not in inspect.signature(tool).parameters
-    result = asyncio.run(tools.get_consultation_fee(doctor="Anaya"))
-    assert result["data"]["amount"] == "450.00"
-    assert set(result) == {"status", "data", "next_action"}
-    result = asyncio.run(tools.get_doctor_availability(doctor="Anaya"))
-    assert not result["data"]["appointment_confirmed"]
-
-
-def test_tool_scope_mismatch_and_errors_are_sanitized(content):
-    content["clinic_id"] = uid(999)
-    assert asyncio.run(make_tools(content).find_doctors())["status"] == "unavailable"
-
-    class Broken:
-        async def load(self):
-            raise RuntimeError("secret connection password and private note")
-
-    result = asyncio.run(make_tools(content, Broken()).find_doctors())
-    assert result["status"] == "failed" and "secret" not in str(result)
-
-
 def test_snapshot_is_frozen_and_original_edits_cannot_change_it(content):
     service = engine(content)
     content["doctors"][0]["display_name"] = "Changed draft"
@@ -384,13 +348,3 @@ def test_requested_status_offset_and_date_validation(content):
     for text in ["2026-09-21T12:00:00", "2026-09-21T00:00:00Z"]:
         with pytest.raises(ValueError):
             service.current_status(requested_datetime=text)
-
-
-def test_dependency_timeout_is_sanitized(content):
-    class Slow:
-        async def load(self):
-            raise asyncio.TimeoutError("private timeout diagnostic")
-
-    result = asyncio.run(make_tools(content, Slow()).find_doctors())
-    assert result["status"] == "failed"
-    assert "private" not in str(result)

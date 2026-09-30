@@ -21,4 +21,5 @@ venv/
 .mypy_cache/
 dist/
 build/
+site/
 .qdrant_storage/

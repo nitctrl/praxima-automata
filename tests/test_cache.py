@@ -193,6 +193,10 @@ def test_mask_keeps_dates_and_uuids():
     assert observability.mask(text) == text
 
 
+def test_mask_hides_numbers_inside_sip_room_names():
+    assert "9876543210" not in observability.mask("room=sip_+919876543210_abc")
+
+
 def test_json_logs_omit_exception_messages():
     try:
         raise ValueError("patient said +919876543210")

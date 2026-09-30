@@ -25,7 +25,8 @@ def classify(text: str) -> SafetyDecision:
         (
             "emergency",
             r"\b(emergency|suicide|overdose|unconscious|can t breathe|cannot breathe|"
-            r"chest pain|kill myself|bleeding heavily|saans nahi|behosh)\b|आपातकाल|बेहोश|सांस नहीं",
+            r"chest pain|kill myself|bleeding heavily|saans nahi|behosh|seene me\w* dard)\b|"
+            r"आपातकाल|बेहोश|सांस नहीं|सीने में दर्द|छाती में दर्द",
         ),
         (
             "medical",

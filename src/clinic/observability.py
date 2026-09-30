@@ -25,7 +25,8 @@ _context: contextvars.ContextVar[dict[str, str]] = contextvars.ContextVar(
     "clinic_log_context", default={}
 )
 # Phone-like digit runs (10-15 digits, optional +). Dates, UUIDs and short counts survive.
-PHONE = re.compile(r"(?<![\w.])\+?\d{10,15}(?![\w.])")
+# "_" and ":" are separators, not word characters, so "sip_+9198..." is still masked.
+PHONE = re.compile(r"(?<![0-9A-Za-z.])\+?\d{10,15}(?![0-9A-Za-z.])")
 
 
 def bind(**fields: object) -> None:

@@ -15,17 +15,25 @@ from clinic.settings import ConfigurationError, DatabaseSettings
 
 
 class RuntimeDatabase:
+    """Connections for one call.
+
+    LiveKit runs each call in its own process, so this pool lives exactly as long as the
+    call. Keep it small and point ``DATABASE_URL`` at the Supabase pooler so Postgres
+    connections scale with concurrent calls, not with worker processes.
+    """
+
     def __init__(self, settings: DatabaseSettings) -> None:
         self._pool: AsyncConnectionPool[AsyncConnection[dict[str, Any]]] = AsyncConnectionPool(
             settings.dsn,
             open=False,
             min_size=0,
-            max_size=4,
+            max_size=2,
             max_waiting=16,
             # Allow the configured ten-second connection attempt to finish before
             # declaring the pool unavailable on a cold Supabase connection.
             timeout=12,
-            kwargs={"row_factory": dict_row, "connect_timeout": 10},
+            # No server-side prepared statements: required by transaction-mode pooling.
+            kwargs={"row_factory": dict_row, "connect_timeout": 10, "prepare_threshold": None},
         )
 
         self._opening: asyncio.Task[None] | None = None

@@ -1,0 +1,32 @@
+[project]
+site_name = "AI Clinic Receptionist — Delivery Readiness"
+site_description = "Deployment, platform integration and clinic onboarding guide"
+nav = [
+  { "Home" = "index.md" },
+  { "Market readiness" = "market-readiness.md" },
+  { "Voice-agent architecture" = "product-architecture.md" },
+  { "Platform contract" = "schema-contract.md" },
+]
+
+[project.theme]
+language = "en"
+features = [
+  "content.code.copy",
+  "navigation.footer",
+  "navigation.sections",
+  "navigation.top",
+  "search.highlight",
+]
+
+[project.markdown_extensions]
+admonition = {}
+attr_list = {}
+toc.permalink = true
+pymdownx.details = {}
+pymdownx.highlight.anchor_linenums = true
+pymdownx.highlight.line_spans = "__span"
+pymdownx.highlight.pygments_lang_class = true
+pymdownx.inlinehilite = {}
+pymdownx.superfences = {}
+pymdownx.tabbed.alternate_style = true
+pymdownx.tasklist.custom_checkbox = true

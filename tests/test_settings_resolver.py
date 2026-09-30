@@ -23,6 +23,10 @@ def test_valid_settings_redact_connection():
     assert "postgresql" not in repr(config)
 
 
+def test_pooler_transaction_port_is_allowed():
+    DatabaseSettings.validate(VALID.replace("5432", "6543"), REF)
+
+
 @pytest.mark.parametrize(
     "suffix",
     [
@@ -46,7 +50,7 @@ def test_blank_or_duplicate_libpq_overrides_rejected(suffix):
     [
         "",
         "postgresql://localhost/postgres",
-        VALID.replace("5432", "6543"),
+        VALID.replace("5432", "5433"),
         VALID.replace("postgres?", "postgresappend%20?"),
         VALID.replace("require", "disable"),
         VALID.replace("example@", "bad@password@"),

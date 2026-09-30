@@ -264,7 +264,12 @@ class StructuredKnowledge:
             next_action="ask_for_clarification" if status != "success" else "none",
         )
 
-    def availability(self, query: Query) -> Result:
+    def availability(self, query: Query, *, trim_past: bool = True) -> Result:
+        """Published hours for one doctor and date.
+
+        `trim_past=False` keeps today's windows whole so slot grids stay anchored to the
+        published start time; callers must then filter past slots themselves.
+        """
         day = self.day(query.requested_date)
         doctor = self._choice([d for d in self.snapshot.doctors if d.effective(day)], query.doctor)
         location = self._choice(
@@ -302,7 +307,7 @@ class StructuredKnowledge:
         if end <= start:
             raise ValueError("Time window must have increasing boundaries")
         windows = intersect(windows, [(self.instant(day, start), self.instant(day, end))])
-        if day == self.now().date():
+        if trim_past and day == self.now().date():
             windows = intersect(
                 windows,
                 [
@@ -333,12 +338,18 @@ class StructuredKnowledge:
         )
 
     def slot_times(
-        self, hours: Sequence[dict[str, str]], taken: Collection[str]
+        self,
+        hours: Sequence[dict[str, str]],
+        taken: Collection[str],
+        *,
+        not_before: datetime | None = None,
     ) -> list[str]:
         """Cut published windows into the clinic's configured slot length.
 
         `hours` comes from `availability`, so closures, exceptions and notices are
         already applied. Slots crossing midnight are dropped rather than wrapped.
+        The grid starts at each window's start so every call offers the same times;
+        slots starting before `not_before` are skipped, never shifted.
         """
         step = timedelta(minutes=self.snapshot.slot_minutes)
         free: list[str] = []
@@ -346,7 +357,11 @@ class StructuredKnowledge:
             start = datetime.fromisoformat(window["start"])
             end = datetime.fromisoformat(window["end"])
             while start + step <= end and len(free) < MAXIMUM_OFFERED_SLOTS:
-                if (start + step).date() == start.date() and start.strftime("%H:%M") not in taken:
+                if (
+                    (start + step).date() == start.date()
+                    and start.strftime("%H:%M") not in taken
+                    and (not_before is None or start >= not_before)
+                ):
                     free.append(start.strftime("%H:%M"))
                 start += step
         return free

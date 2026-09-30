@@ -30,7 +30,7 @@ class DatabaseSettings:
                 uri.scheme not in {"postgres", "postgresql"}
                 or not (direct or pooler)
                 or uri.path != "/postgres"
-                or uri.port not in {None, 5432}
+                or uri.port not in ({None, 5432, 6543} if pooler else {None, 5432})
                 or not uri.password
                 or not uri.username
                 or uri.netloc.count("@") != 1
@@ -42,7 +42,8 @@ class DatabaseSettings:
                 raise ValueError
         except ValueError:
             raise ConfigurationError(
-                "Use this project's direct/session-pooler PostgreSQL URI on port 5432 "
-                "with database postgres, an encoded password and sslmode=require."
+                "Use this project's direct PostgreSQL URI (port 5432) or its Supabase pooler "
+                "URI (port 5432 or 6543) with database postgres, an encoded password and "
+                "sslmode=require."
             ) from None
         return cls(dsn=dsn, project_ref=project_ref)

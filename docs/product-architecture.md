@@ -1,8 +1,9 @@
 # AI Clinic Receptionist: product architecture
 
-Audit date: 2026-09-17. Status: **Phase 0 complete; proposed design, not an implemented product**.
+Audit date: 2026-09-17. Sections 1–9 are the original Phase 0 design and are kept as
+design reference; the **current repository split is described in section 10**.
 
-This is an administrative assistant, not a medical device, clinical decision-support system, diagnostic service, or triage service. The requirements in [the product specification](../.github/copilot-instructions.md) govern implementation. An appointment request confirmed by the caller is **not** a confirmed appointment.
+This is an administrative assistant, not a medical device, clinical decision-support system, diagnostic service, or triage service. The repository's product specification governs implementation. An appointment request confirmed by the caller is **not** a confirmed appointment.
 
 ## 1. Verified current architecture
 
@@ -17,7 +18,7 @@ This is an administrative assistant, not a medical device, clinical decision-sup
 | [sip/dispatch-rule.json](../sip/dispatch-rule.json) | Existing inbound trunk reference, individual room dispatch, named worker |
 | sip/inbound-trunk.json (local, ignored) | Existing called number and inbound noise suppression configuration |
 | [.gitignore](../.gitignore) | Secrets, local SIP configuration, environment and cache exclusions |
-| [.github/copilot-instructions.md](../.github/copilot-instructions.md) | Product requirements; user-authored, not changed by this audit |
+| Product specification (repository instructions) | Product requirements; user-authored, not changed by this audit |
 
 There is no first-party database, frontend, API server, migration, automated test suite, CI workflow, deployment manifest, or application README. Secret files and backups were not read. Both `.env` and `.env.bak-preplivo` are ignored by Git; their existence alone does not establish public exposure. The inbound trunk JSON is also untracked and ignored. Do not overwrite this working local configuration with template values.
 
@@ -299,7 +300,7 @@ Developer documentation will include `.env.example` placeholders, local setup, d
 
 ## 9. Assumptions and unresolved decisions
 
-1. **Phase 1 environment selected (2026-09-17):** the user selected a dedicated Supabase Cloud development project. Connection and initially empty public schema were verified; Phase 1 migrations and fictional fixtures are now applied. Region/vendor approval for production remains pending. Do not reuse a production project or the existing local PostgreSQL service. Credentials stay in ignored configuration; the new data package is not integrated into the voice worker. See [Phase 1 results](phase-1-database.md).
+1. **Phase 1 environment selected (2026-09-17):** the user selected a dedicated Supabase Cloud development project. Region/vendor approval for production remains pending. Do not reuse a production project or the existing local PostgreSQL service. Credentials stay in ignored configuration or secret management.
 2. **Called-number trust:** inspect real inbound SIP metadata and verify the destination attribute/trunk binding before enabling clinic mode. Current code only reads the caller number. Missing authoritative destination must reject initialization, not guess a clinic.
 3. **Call-health discrepancy:** the supplied spec says real calling works; earlier conversation reports failed calls and terminal DNS failures. Preserve the route, but require a fresh successful pilot call as evidence. This document does not certify its current end-to-end health.
 4. **Clinic approvals:** actual emergency text, transfers/hours, languages, privacy notices and retention must be clinic-approved. Fictional development data cannot stand in for production approval.
@@ -309,15 +310,28 @@ Developer documentation will include `.env.example` placeholders, local setup, d
 8. **Safety revocation versus snapshot pinning:** ordinary publications only affect new calls. Emergency/legal access revocation may withhold content or stop a call, never silently replace its pinned facts; approval of this operational policy is required for deployment.
 9. **Scope exclusions:** no calendar/CRM/WhatsApp/payment/EHR/prescription/insurance/triage/mobile/outbound-campaign implementation. The product is incomplete until every completion gate in the specification is demonstrated.
 
-## 10. Phase 2 implementation status
+## 10. Current repository split
 
-Phase 2 implements version-2 public snapshots, membership-checked preview/publish/
-rollback, structured effective facts and seven typed LiveKit tools. See the
-[Phase 2 report](phase-2-knowledge.md) for publication semantics, legacy snapshot
-compatibility, tests and limitations. No voice-agent/SIP integration was enabled.
-Phase 1 seed publications remain immutable version 1; new tools deliberately
-require an explicit version-2 publication. Phases 3–6 remain pending.
+This repository now contains **only the voice agent**. The platform team owns the
+database migrations, dashboard/API, publication workflow, document upload and the
+WhatsApp/notification sender. The last commit containing those parts is `fbaae43` on
+branch `prune/ai-agent-only`. The interface between the two sides is
+[schema-contract.md](schema-contract.md), which lists the SQL functions, snapshot
+schema, cache keys, SIP attributes and the platform-side SQL changes the agent needs.
 
-## 11. Phase 0 change record
+| Design boundary (section 2) | Where it lives now |
+| --- | --- |
+| LiveKit/Plivo adapter | [src/agent.py](../src/agent.py), [src/clinic/ingress.py](../src/clinic/ingress.py) |
+| `ClinicResolver`, pinned configuration | [src/clinic/resolver.py](../src/clinic/resolver.py), [src/clinic/snapshot.py](../src/clinic/snapshot.py) |
+| Structured facts and precedence | [src/clinic/knowledge.py](../src/clinic/knowledge.py) |
+| Knowledge retrieval | [src/clinic/rag.py](../src/clinic/rag.py), [src/clinic/documents.py](../src/clinic/documents.py), [src/clinic/vectors.py](../src/clinic/vectors.py) |
+| Agent tools (search, slots, booking, callback) | [src/clinic/agent_knowledge.py](../src/clinic/agent_knowledge.py) |
+| Call session, events, callbacks, usage | [src/clinic/calls.py](../src/clinic/calls.py) over `clinic_private` SQL functions |
+| Safety routing | [src/clinic/safety.py](../src/clinic/safety.py), applied before each model turn |
+| Prompt | [src/clinic/prompt.py](../src/clinic/prompt.py), [agent_system_prompt.j2](../src/clinic/templates/agent_system_prompt.j2) |
+| Dashboard, publication, migrations, notifications | Platform repository |
 
-The initial audit added only this architecture document. Following the user's environment selection, `.env.example` was added with placeholder settings. At the end of Phase 0, no agent source, dependencies, secrets, SIP resources, running workers or database schemas had been changed, and no migrations had been applied. Phase 1 subsequently added the isolated data foundation; its changes, verification and remaining gates are recorded in [Phase 1 results](phase-1-database.md). Phase 2's separate record is linked above; phases 3–6 remain pending.
+Deviations from sections 5–6 that remain deliberate: tools are four broad tools rather
+than ten narrow ones; appointments are booked into `calendar_bookings` (platform
+requirement) rather than stored only as requests; transfer is not implemented, so a
+request for a person becomes a callback request.
