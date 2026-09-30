@@ -86,6 +86,28 @@ reviewed version**, then start a new call. Publication indexes the complete publ
 corpus. Without `QDRANT_URL`, the same endpoint remains available with an explicit
 lexical fallback.
 
+## Appointment slots and WhatsApp
+
+A caller can ask what is free and book on the call. `list_available_slots` cuts the
+clinic's published hours into slots of the tenant-configured length (**Settings →
+Appointment slot length**) and removes times already taken. `book_appointment_slot`
+re-checks the slot server-side, writes one row per slot — a unique partial index makes
+double-booking impossible — and queues two WhatsApp messages: a confirmation to the
+caller and a new-booking alert to the clinic. Bookings and delivery status appear on the
+**Calendar** page; a failed message can be retried there.
+
+The agent never chooses the caller's number: it comes from the SIP participant
+attributes. Patient name and number are encrypted with `CLINIC_PII_KEYS` before they
+reach the database, and neither the dashboard nor the browser JWT can read that
+ciphertext.
+
+Sending currently uses a self-hosted **open-wa** EASY API (`OPENWA_API_URL`,
+`OPENWA_API_KEY`); Meta Cloud API replaces it later without touching the agent. Phone
+numbers, WhatsApp numbers and clinic creation belong to the platform administrator on
+the **Platform** page — a clinic cannot change its own numbers. Onboarding a tenant is
+one form (name, owner email, called number, WhatsApp number, timezone); it creates the
+clinic with default hours so it is immediately publishable.
+
 ## Setup
 
 Python 3.10+, `uv`, and a **dedicated Supabase Cloud development project** are

@@ -6,16 +6,19 @@ from uuid import UUID, uuid4
 import pytest
 from test_structured_knowledge import content  # noqa: F401
 
-from clinic.agent_knowledge import CLINIC, AgentKnowledge, load_agent_knowledge
+from clinic.agent_knowledge import AgentKnowledge, load_agent_knowledge
+from clinic.development import fixture_id
 from clinic.prompt import ENVIRONMENT
 from clinic.resolver import ClinicUnavailable
 from clinic.snapshot import Snapshot
+
+CLINIC = fixture_id("A")
 
 
 @pytest.fixture
 def knowledge(content):  # noqa: F811
     content["clinic_id"] = str(CLINIC)
-    return AgentKnowledge(Snapshot.model_validate(content), uuid4())
+    return AgentKnowledge(Snapshot.model_validate(content), uuid4(), clinic=CLINIC)
 
 
 def with_document(source):
@@ -38,13 +41,31 @@ def with_document(source):
 
 def test_agent_exposes_one_rag_tool(knowledge):
     tools = knowledge.function_tools()
-    assert len(tools) == 1
+    assert len(tools) == 3
+    assert {tool.__name__ for tool in tools} == {
+        "search_clinic_knowledge", "list_available_slots", "book_appointment_slot"
+    }
     assert "search_clinic_knowledge" in knowledge.instructions
     assert "specific date or date range" in knowledge.instructions
     assert "Current clinic-local time:" in knowledge.instructions
     assert "do not shorten or reinterpret" in knowledge.instructions
     assert "overrides conflicting document text" in knowledge.instructions
     assert "open/closed question has no date or time" in knowledge.instructions
+
+
+def test_phone_prompt_avoids_language_announcements_filler_and_numbered_markup(knowledge):
+    instructions = knowledge.instructions
+    assert "Switch languages silently" in instructions
+    assert "Call tools silently by default" in instructions
+    assert "not repeated filler" in instructions
+    assert "not Markdown, bullets or numbered lists" in instructions
+    assert "First, cardiology. Second, dermatology." in instructions
+
+
+def test_booking_tools_without_a_database_are_unavailable(knowledge):
+    assert asyncio.run(knowledge.list_available_slots("2026-09-23"))["status"] == "unavailable"
+    result = asyncio.run(knowledge.book_appointment_slot("2026-09-23", "10:00", "Asha Rao"))
+    assert result["status"] == "unavailable"
 
 
 def test_prompt_template_accepts_previous_worker_variable_names():
@@ -60,7 +81,9 @@ def test_prompt_template_accepts_previous_worker_variable_names():
 
 
 def test_only_documents_are_stable_rag_knowledge(content):  # noqa: F811
-    knowledge = AgentKnowledge(Snapshot.model_validate(with_document(content)), uuid4())
+    knowledge = AgentKnowledge(
+        Snapshot.model_validate(with_document(content)), uuid4(), clinic=CLINIC
+    )
 
     async def exercise():
         removed = await knowledge.search_clinic_knowledge("Tell me about Dr Sharma")
@@ -86,7 +109,7 @@ def test_jinja_prompt_includes_active_quick_daily_info(content):  # noqa: F811
         "expires_at": "2027-01-01T00:00:00+00:00",
         "priority": 50,
     }]
-    knowledge = AgentKnowledge(Snapshot.model_validate(payload), uuid4())
+    knowledge = AgentKnowledge(Snapshot.model_validate(payload), uuid4(), clinic=CLINIC)
     assert "Published current and scheduled live updates" in knowledge.instructions
     assert "Reception closes early today" in knowledge.instructions
     result = asyncio.run(knowledge.search_clinic_knowledge("Does reception close early today?"))
@@ -108,7 +131,7 @@ def test_scheduled_live_update_is_searchable_before_it_starts(content):  # noqa:
         "expires_at": end.isoformat(),
         "priority": 100,
     }]
-    knowledge = AgentKnowledge(Snapshot.model_validate(payload), uuid4())
+    knowledge = AgentKnowledge(Snapshot.model_validate(payload), uuid4(), clinic=CLINIC)
     assert "Published current and scheduled live updates" in knowledge.instructions
     assert "Devi Pujan" in knowledge.instructions
     result = asyncio.run(knowledge.search_clinic_knowledge(
@@ -122,6 +145,12 @@ def test_scheduled_live_update_is_searchable_before_it_starts(content):  # noqa:
 
 
 def test_other_clinic_rejected(content):  # noqa: F811
+    with pytest.raises(ClinicUnavailable):
+        AgentKnowledge(Snapshot.model_validate(content), clinic=CLINIC)
+
+
+def test_snapshot_without_resolved_clinic_rejected(content):  # noqa: F811
+    content["clinic_id"] = str(CLINIC)
     with pytest.raises(ClinicUnavailable):
         AgentKnowledge(Snapshot.model_validate(content))
 
@@ -140,4 +169,5 @@ def test_snapshot_is_pinned(knowledge, content):  # noqa: F811
     content["name"] = "Changed unpublished name"
     assert knowledge.snapshot is not None
     assert knowledge.snapshot.name == "Fictional Clinic"
-    assert not hasattr(knowledge, "database")
+    # Booking needs a pool, but nothing here may reach the database on its own.
+    assert knowledge.database is None

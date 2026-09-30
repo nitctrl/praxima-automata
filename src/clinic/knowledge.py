@@ -1,6 +1,6 @@
 """Deterministic structured administrative facts from one frozen publication."""
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Literal, TypeVar
 from uuid import UUID
@@ -12,6 +12,8 @@ from clinic.snapshot import Doctor, Location, Notice, PublicModel, Service, Snap
 
 Entity = TypeVar("Entity", bound=Doctor | Service | Location)
 Interval = tuple[datetime, datetime]
+# A phone caller cannot absorb a long list, and it bounds the slot loop.
+MAXIMUM_OFFERED_SLOTS = 40
 
 
 class Query(PublicModel):
@@ -329,6 +331,25 @@ class StructuredKnowledge:
                 "booking_policy": "Working hours are not slots. Staff must confirm requests.",
             },
         )
+
+    def slot_times(
+        self, hours: Sequence[dict[str, str]], taken: Collection[str]
+    ) -> list[str]:
+        """Cut published windows into the clinic's configured slot length.
+
+        `hours` comes from `availability`, so closures, exceptions and notices are
+        already applied. Slots crossing midnight are dropped rather than wrapped.
+        """
+        step = timedelta(minutes=self.snapshot.slot_minutes)
+        free: list[str] = []
+        for window in hours:
+            start = datetime.fromisoformat(window["start"])
+            end = datetime.fromisoformat(window["end"])
+            while start + step <= end and len(free) < MAXIMUM_OFFERED_SLOTS:
+                if (start + step).date() == start.date() and start.strftime("%H:%M") not in taken:
+                    free.append(start.strftime("%H:%M"))
+                start += step
+        return free
 
     def _serialize(self, windows: Sequence[Interval]) -> list[dict[str, str]]:
         return [

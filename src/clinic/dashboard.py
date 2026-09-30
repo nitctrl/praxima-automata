@@ -22,13 +22,14 @@ from uuid import UUID
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pydantic import ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from clinic.answers import GroundedAnswerer
+from clinic.cache import Cache
 from clinic.documents import (
     CATEGORIES,
     MAX_UPLOAD_BYTES,
@@ -39,7 +40,8 @@ from clinic.documents import (
 from clinic.privacy import PiiCipher
 from clinic.rag import HybridRetriever, active_quick_info, snapshot_sections
 from clinic.snapshot import Snapshot
-from clinic.vectors import VectorSearch
+from clinic.vectors import VectorScope, VectorSearch
+from clinic.whatsapp import OpenWa
 
 ASSETS = Path(__file__).parent / "web"
 logger = logging.getLogger(__name__)
@@ -47,13 +49,25 @@ EDIT_FIELDS: dict[str, str] = {
     "temporary_notices": "location_id,doctor_id,service_id,notice_type,"
     "public_message,internal_note,"
     "starts_at,expires_at,priority,publication_status",
+    # A one-off available/unavailable window for one date; the agent offers slots
+    # inside a published 'available' window immediately, ahead of any recurring schedule.
+    "schedule_exceptions": "doctor_id,location_id,exception_date,status,"
+    "start_time,end_time,public_message,internal_note,publication_status",
 }
 READ_FIELDS = {table: "id," + fields for table, fields in EDIT_FIELDS.items()} | {
     "appointment_requests": "id,call_session_id,preferred_date,status,"
     "doctor_id,service_id,created_at",
     "callback_requests": "id,call_session_id,requested_time,reason_category,status,created_at",
+    # Numbers are configured by platform administrators; clinics read them only.
+    "clinic_integrations": "id,kind,provider,external_reference,status,created_at",
+    "calendar_bookings": "id,requested_date,start_time,end_time,status,"
+    "doctor_id,service_id,source,created_at",
+    "whatsapp_messages": "id,booking_id,audience,status,attempts,last_error,sent_at,created_at",
     "call_sessions": "id,started_at,ended_at,duration_seconds,disposition,failure_code,safety_flag,"
     "short_administrative_summary,configuration_version_id,is_test",
+    # Read-only reference lists for the schedule editor's doctor/location pickers.
+    "doctors": "id,display_name,status",
+    "locations": "id,name,status",
 }
 DOCUMENT_FIELDS = (
     "id,title,original_filename,document_category,status,version,checksum,"
@@ -171,6 +185,7 @@ def create_app(
     buckets: dict[str, tuple[float, int]] = {}
     previews: dict[tuple[str, UUID], dict[str, Any]] = {}
     vectors = VectorSearch.from_environment()
+    cache = Cache.from_environment()
     templates = Environment(loader=FileSystemLoader(ASSETS), autoescape=select_autoescape())
 
     @asynccontextmanager
@@ -178,6 +193,9 @@ def create_app(
         yield
         sessions.clear()
         await backend.client.aclose()
+        await cache.aclose()
+        if vectors is not None:
+            await vectors.aclose()
 
     app = FastAPI(
         title="Clinic reception", docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan
@@ -374,6 +392,49 @@ def create_app(
     async def platform(request: Request) -> Any:
         return await rpc(await identity(request), "clinic_platform_overview", {})
 
+    @app.post("/api/platform/onboard")
+    async def onboard(request: Request) -> Any:
+        """Create a tenant with its called number and WhatsApp number in one step."""
+        session = await identity(request)
+        values = await data(request)
+        required = {"clinic_name", "owner_email", "called_number", "whatsapp_number"}
+        if not required <= set(values) or set(values) - (required | {"zone"}):
+            raise HTTPException(400, "Clinic name, owner email and both numbers are required.")
+        # clinic_platform_onboard rejects anyone who is not an active platform admin.
+        return await rpc(session, "clinic_platform_onboard", values)
+
+    @app.post("/api/platform/integration")
+    async def platform_integration(request: Request) -> Any:
+        session = await identity(request)
+        values = await data(request)
+        if set(values) != {"target", "integration_kind", "reference", "new_status"}:
+            raise HTTPException(400, "Clinic, kind, reference and status are required.")
+        return await rpc(session, "clinic_platform_integration", values)
+
+    @app.get("/api/platform/whatsapp/qr")
+    async def whatsapp_qr(request: Request) -> Response:
+        """Proxy the open-wa pairing QR so it is same-origin under the page CSP."""
+        session = await identity(request)
+        await rpc(session, "clinic_platform_overview", {})
+        sender = OpenWa.from_environment()
+        if sender is None:
+            raise HTTPException(503, "Configure the open-wa endpoint first.")
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                content, media = await sender.link_qr(client)
+        except Exception:
+            logger.warning("open-wa pairing code unavailable")
+            raise HTTPException(503, "open-wa did not return a pairing code.") from None
+        return Response(content, media_type=media)
+
+    @app.post("/api/clinics/{clinic}/whatsapp/{message}/retry")
+    async def whatsapp_retry(clinic: UUID, message: UUID, request: Request) -> Any:
+        session = await authorize(request, clinic, MANAGERS)
+        await rpc(
+            session, "clinic_whatsapp_retry", {"target": str(clinic), "message": str(message)}
+        )
+        return {"queued": True}
+
     @app.get("/api/clinics/{clinic}/rows/{table}")
     async def rows(clinic: UUID, table: str, request: Request, offset: int = 0) -> Any:
         session = await authorize(request, clinic)
@@ -388,7 +449,17 @@ def create_app(
                 "clinic_id": f"eq.{clinic}",
                 "limit": "50",
                 "offset": str(offset),
-                "order": "started_at.desc,id.desc" if table == "call_sessions" else "id.asc",
+                "order": (
+                    "started_at.desc,id.desc"
+                    if table == "call_sessions"
+                    else "requested_date.desc,start_time.asc"
+                    if table == "calendar_bookings"
+                    else "exception_date.asc,created_at.desc"
+                    if table == "schedule_exceptions"
+                    else "created_at.desc,id.desc"
+                    if table in {"clinic_integrations", "whatsapp_messages"}
+                    else "id.asc"
+                ),
             },
         )
 
@@ -435,7 +506,8 @@ def create_app(
                 "select": "name,timezone,greeting,emergency_message,"
                 "fallback_message,default_language,"
                 "supported_languages,maximum_call_duration_seconds,monthly_minute_limit,"
-                "active_configuration_version_id,status,recording_enabled,transfer_enabled",
+                "slot_minutes,active_configuration_version_id,status,recording_enabled,"
+                "transfer_enabled",
                 "id": f"eq.{clinic}",
                 "limit": "1",
             },
@@ -501,6 +573,8 @@ def create_app(
             raise HTTPException(409, "Preview and review this configuration first.")
         result = await rpc(session, "clinic_publish", saved)
         previews.pop(key, None)
+        # New calls must resolve the new active version; in-flight calls keep theirs.
+        await cache.invalidate_clinic(clinic)
         return {"published": result[0]["version_id"], "indexed": await reindex(result[0], clinic)}
 
     async def reindex(published_version: dict[str, Any], clinic: UUID) -> int | None:
@@ -510,7 +584,8 @@ def create_app(
         try:
             snapshot = Snapshot.model_validate(published_version["snapshot"])
             return await vectors.index(
-                clinic, UUID(str(published_version["version_id"])), snapshot_sections(snapshot)
+                VectorScope(clinic, UUID(str(published_version["version_id"]))),
+                snapshot_sections(snapshot),
             )
         except Exception:
             logger.warning("Semantic index refresh failed; lexical search still serves calls")

@@ -175,6 +175,8 @@ class Snapshot(PublicModel):
     clinic_id: UUID
     name: str
     timezone: str
+    # Appointment slot length chosen by the clinic; older snapshots predate the setting.
+    slot_minutes: int = Field(default=30, ge=5, le=240)
     default_language: str
     supported_languages: tuple[str, ...]
     greeting: str

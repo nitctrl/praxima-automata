@@ -22,6 +22,15 @@ def seed_fictional_clinics(conn: Connection[Any]) -> None:
             "SELECT 1 FROM public.clinics WHERE id = %s", (clinic_id,)
         ).fetchone()
         if existing:
+            # Backfill integrations added by later migrations without touching prior edits.
+            number = "+12025550101" if label == "A" else "+12025550102"
+            conn.execute(
+                "INSERT INTO public.clinic_integrations "
+                "(clinic_id, kind, provider, external_reference, status) "
+                "VALUES (%s,'calendar','internal',%s,'active'),"
+                "(%s,'whatsapp','open-wa',%s,'active') ON CONFLICT (clinic_id, kind) DO NOTHING",
+                (clinic_id, f"{label.lower()}-calendar", clinic_id, number),
+            )
             continue
         conn.execute(
             "INSERT INTO public.clinics (id, name, slug, greeting, emergency_message, "
@@ -50,6 +59,14 @@ def seed_fictional_clinics(conn: Connection[Any]) -> None:
             "VALUES (%s, %s, 'test', %s, 'fixture-only-not-a-live-trunk', 'active')",
             (fixture_id(f"{label}-phone"), clinic_id, number),
         )
+        conn.execute(
+            "INSERT INTO public.clinic_integrations "
+            "(clinic_id, kind, provider, external_reference, status) "
+            "VALUES (%s,'calendar','internal',%s,'active'),(%s,'whatsapp','open-wa',%s,'active')",
+            (clinic_id, f"{label.lower()}-calendar", clinic_id, number),
+        )
+        # Native-script aliases let Hindi speech (transcribed in Devanagari) match doctors.
+        native = {"Anaya Sharma": "अनाया शर्मा", "Dev Sharma": "देव शर्मा"}
         for index, name in enumerate(["Anaya Sharma", "Dev Sharma"]):
             doctor_id = fixture_id(f"{label}-doctor-{index}")
             conn.execute(
@@ -60,7 +77,7 @@ def seed_fictional_clinics(conn: Connection[Any]) -> None:
                     clinic_id,
                     f"Dr {name} ({label}, fictional)",
                     name.casefold(),
-                    ["Sharma"],
+                    ["Sharma", "शर्मा", native[name]],
                     "General consultation",
                     ["hi-IN", "en-IN"],
                     date(2026, 1, 1),

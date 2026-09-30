@@ -2,7 +2,6 @@
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import dotenv_values
@@ -13,6 +12,7 @@ from clinic.db import RuntimeDatabase
 from clinic.dev_conversation import DevelopmentConversation, Reply
 from clinic.development import fixture_id
 from clinic.fallback_audio import FALLBACK, load_audio
+from clinic.ingress import SipIngress
 from clinic.questions import Answer
 from clinic.resolver import (
     ClinicResolver,
@@ -62,12 +62,6 @@ async def preflight(root: Path) -> None:
                 raise ValueError("Outcome migration required")
     finally:
         await database.close()
-
-
-@dataclass(frozen=True)
-class SipIngress:
-    destination: InboundDestination
-    call_id: str
 
 
 def ingress(kind: int, attributes: Mapping[str, str]) -> SipIngress:

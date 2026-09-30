@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 from clinic.documents import DocumentIndex, excerpt, tokens
 from clinic.snapshot import DocumentSection, Notice, Snapshot
-from clinic.vectors import VectorSearch
+from clinic.vectors import VectorScope, VectorSearch
 
 logger = logging.getLogger(__name__)
 
@@ -58,10 +58,11 @@ class HybridRetriever:
         semantic: tuple[UUID, ...] = ()
         if self.vectors is not None and self.version is not None:
             try:
+                # Tenant + pinned version come from the snapshot this retriever serves;
+                # semantic IDs outside this snapshot's sections are ignored by the index.
                 semantic = tuple(await self.vectors.search(
                     question,
-                    clinic=self.snapshot.clinic_id,
-                    version=self.version,
+                    scope=VectorScope(self.snapshot.clinic_id, self.version),
                     doctor_id=None,
                     limit=max(limit * 3, 10),
                 ))

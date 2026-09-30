@@ -137,6 +137,27 @@ def test_read_only_roles_cannot_author(web, role):
     )
 
 
+def test_schedule_exception_is_editable_but_doctors_and_locations_are_read_only(web):
+    client, _ = web
+    headers = login(client)
+    assert (
+        client.post(
+            f"/api/clinics/{CLINIC}/rows/schedule_exceptions",
+            json={"doctor_id": str(DOCTOR), "status": "available", "public_message": "Test"},
+            headers=headers,
+        ).status_code
+        == 200
+    )
+    assert client.get(f"/api/clinics/{CLINIC}/rows/doctors").status_code == 200
+    assert client.get(f"/api/clinics/{CLINIC}/rows/locations").status_code == 200
+    assert (
+        client.post(
+            f"/api/clinics/{CLINIC}/rows/doctors", json={"display_name": "Dr New"}, headers=headers
+        ).status_code
+        == 403
+    )
+
+
 MARKDOWN = b"# Our clinic\n\nWe opened in a two room building.\n"
 
 

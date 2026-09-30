@@ -1,5 +1,7 @@
 """Bounded async connections for the restricted voice runtime, not migrations."""
 
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
@@ -26,20 +28,45 @@ class RuntimeDatabase:
             kwargs={"row_factory": dict_row, "connect_timeout": 10},
         )
 
+        self._opening: asyncio.Task[None] | None = None
+
     async def open(self) -> None:
         await self._pool.open()
         try:
-            async with self.connection():
+            async with self._connection():
                 pass
         except Exception:
             await self._pool.close()
             raise
 
+    def open_in_background(self) -> None:
+        """Start connecting now; cache hits at call start need not wait for Postgres."""
+        if self._opening is None:
+            self._opening = asyncio.ensure_future(self.open())
+
+    async def ready(self) -> None:
+        if self._opening is not None:
+            await asyncio.shield(self._opening)
+
     async def close(self) -> None:
+        if self._opening is not None and not self._opening.done():
+            self._opening.cancel()
+            with contextlib.suppress(BaseException):
+                await self._opening
+        elif self._opening is not None and not self._opening.cancelled():
+            self._opening.exception()  # mark a failed background open as observed
         await self._pool.close()
 
     @asynccontextmanager
     async def connection(
+        self, clinic_id: UUID | None = None
+    ) -> AsyncIterator[AsyncConnection[dict[str, Any]]]:
+        await self.ready()
+        async with self._connection(clinic_id) as conn:
+            yield conn
+
+    @asynccontextmanager
+    async def _connection(
         self, clinic_id: UUID | None = None
     ) -> AsyncIterator[AsyncConnection[dict[str, Any]]]:
         async with self._pool.connection() as conn, conn.transaction():

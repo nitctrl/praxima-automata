@@ -8,7 +8,7 @@ import pytest
 from livekit.agents.llm import find_function_tools
 from pydantic import ValidationError
 
-from clinic.knowledge import Query, StructuredKnowledge
+from clinic.knowledge import MAXIMUM_OFFERED_SLOTS, Query, StructuredKnowledge
 from clinic.resolver import ClinicScope
 from clinic.snapshot import Snapshot, normalize
 from clinic.tools import ClinicTools
@@ -169,6 +169,23 @@ def test_tomorrow_evening_is_working_hours_not_booking(content):
     )
     assert result.data["hours"][0]["start"].endswith("17:00:00+05:30")
     assert result.data["appointment_confirmed"] is False
+
+
+def test_slot_times_cut_hours_skip_taken_and_stop_at_midnight(content):
+    content["slot_minutes"] = 45
+    service = engine(content)
+    hours = [{"start": "2026-09-21T09:00:00+05:30", "end": "2026-09-21T11:00:00+05:30"}]
+    assert service.slot_times(hours, set()) == ["09:00", "09:45"]
+    assert service.slot_times(hours, {"09:45"}) == ["09:00"]
+    # A window running to midnight must not produce a slot ending on the next day.
+    overnight = [{"start": "2026-09-21T23:00:00+05:30", "end": "2026-09-22T00:30:00+05:30"}]
+    assert service.slot_times(overnight, set()) == ["23:00"]
+
+
+def test_slot_times_are_capped_for_a_phone_caller(content):
+    content["slot_minutes"] = 5
+    hours = [{"start": "2026-09-21T09:00:00+05:30", "end": "2026-09-21T20:00:00+05:30"}]
+    assert len(engine(content).slot_times(hours, set())) == MAXIMUM_OFFERED_SLOTS
 
 
 @pytest.mark.parametrize("doctor", [None, uid(2)])
