@@ -8,15 +8,15 @@ from zoneinfo import ZoneInfo
 
 from pydantic import Field
 
-from praxima.modules.releases.domain.snapshot import (
+from praxima.contracts.clinic_snapshot import (
     Doctor,
     Location,
     Notice,
     PublicModel,
     Service,
     Snapshot,
-    normalize,
 )
+from praxima.shared.kernel.text import normalize
 
 Entity = TypeVar("Entity", bound=Doctor | Service | Location)
 Interval = tuple[datetime, datetime]

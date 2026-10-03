@@ -14,9 +14,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from praxima.modules import agents, audit, catalog, engagement, knowledge, tenancy
-from praxima.modules.iam import Actor, require
-from praxima.modules.releases.domain.agent_snapshot import (
+from praxima.contracts.agent_snapshot import (
     MAX_SNAPSHOT_BYTES,
     SCHEMA_VERSION,
     AgentSnapshot,
@@ -25,6 +23,8 @@ from praxima.modules.releases.domain.agent_snapshot import (
     digest_of,
     summarize,
 )
+from praxima.modules import agents, audit, catalog, engagement, knowledge, tenancy
+from praxima.modules.iam import Actor, require
 from praxima.modules.releases.infrastructure.models import AgentRelease
 from praxima.shared.db.base import utc_now
 from praxima.shared.db.errors import translate_db_errors

@@ -17,9 +17,9 @@ from uuid import UUID, uuid4
 import pytest
 from psycopg.pq import TransactionStatus
 
+from praxima.contracts.clinic_snapshot import Snapshot
 from praxima.dev import activation
 from praxima.dev.development import fixture_id
-from praxima.modules.releases.domain.snapshot import Snapshot
 from praxima.shared.db.settings import ConfigurationError
 
 ROOT = Path(__file__).resolve().parents[1]

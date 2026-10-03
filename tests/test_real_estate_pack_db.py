@@ -46,8 +46,8 @@ def test_a_real_estate_workspace_end_to_end(api, monkeypatch):
     import base64
     import os
 
-    from praxima.runtime.release.knowledge import ReleaseKnowledge
-    from praxima.runtime.release.loader import load_release
+    from praxima.ai.release.loader import load_release
+    from praxima.ai.tools.release_tools import ReleaseKnowledge
 
     register_pack()
     monkeypatch.setenv("PRAXIMA_RUNTIME_DATABASE_URL", URL)

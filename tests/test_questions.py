@@ -3,8 +3,8 @@
 import pytest
 from test_structured_knowledge import content, engine, exception  # noqa: F401
 
-from praxima.runtime.questions import answer_question
-from praxima.runtime.speech.normalize import english_speech
+from praxima.ai.legacy.questions import answer_question
+from praxima.ai.speech.normalize import english_speech
 
 
 def ask(payload, text, **kwargs):

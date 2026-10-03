@@ -7,7 +7,7 @@ from unittest.mock import Mock
 import pytest
 from livekit.agents import llm
 
-from praxima.runtime import call_flow as flow
+from praxima.ai.worker import call_flow as flow
 
 
 def test_failures_map_to_fixed_messages():
@@ -84,7 +84,7 @@ def test_sip_ingress_uses_only_trusted_attributes():
     ],
 )
 def test_worker_routes_each_turn_before_the_model(monkeypatch, text, spoken, guard):
-    from praxima.entrypoints import voice_worker as worker
+    from praxima.ai.worker import main as worker
 
     agent = worker.VoiceAgent.__new__(worker.VoiceAgent)  # no providers needed
     agent.clinic_knowledge = Mock(

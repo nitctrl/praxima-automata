@@ -11,11 +11,11 @@ from zoneinfo import ZoneInfo
 
 from psycopg.types.json import Jsonb
 
+from praxima.contracts.clinic_snapshot import Snapshot
 from praxima.modules.agents.application.resolver import ClinicScope, ConfigurationRepository
 from praxima.modules.engagement.domain.requests import ConfirmationState, RequestDetails
-from praxima.modules.releases.domain.snapshot import Snapshot
-from praxima.runtime.policy.safety import SafetyDecision, classify, response
 from praxima.shared.db.pool import RuntimeDatabase
+from praxima.shared.kernel.safety import SafetyDecision, classify, response
 from praxima.shared.security.privacy import PiiCipher
 
 

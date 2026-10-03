@@ -7,13 +7,13 @@ from uuid import UUID, uuid4
 import pytest
 from docx import Document as DocxDocument
 
+from praxima.contracts.clinic_snapshot import DocumentSection
 from praxima.modules.knowledge.domain.documents import (
     DocumentIndex,
     DocumentRejected,
     excerpt,
     extract,
 )
-from praxima.modules.releases.domain.snapshot import DocumentSection
 
 DOCTOR = UUID(int=2)
 OTHER = UUID(int=3)

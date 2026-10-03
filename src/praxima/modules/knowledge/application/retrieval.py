@@ -8,9 +8,10 @@ from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from praxima.contracts.clinic_snapshot import DocumentSection, Notice, Snapshot
 from praxima.integrations.vectors.qdrant import VectorSearch
-from praxima.modules.knowledge.domain.documents import DocumentIndex, excerpt, tokens
-from praxima.modules.releases.domain.snapshot import DocumentSection, Notice, Snapshot
+from praxima.modules.knowledge.domain.documents import DocumentIndex, excerpt
+from praxima.shared.kernel.text import tokens
 
 logger = logging.getLogger(__name__)
 

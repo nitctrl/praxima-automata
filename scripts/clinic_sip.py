@@ -21,10 +21,9 @@ from livekit.agents import (
 from livekit.agents.voice.events import MetricsCollectedEvent
 from livekit.plugins import noise_cancellation, sarvam, silero
 
-from praxima.dev.activation import load_development
-from praxima.dev.dev_voice import DevelopmentVoiceAgent
-from praxima.dev.fallback_audio import FALLBACK, load_audio
-from praxima.dev.sip_test import (
+from praxima.ai.dev.dev_voice import DevelopmentVoiceAgent
+from praxima.ai.dev.fallback_audio import FALLBACK, load_audio
+from praxima.ai.dev.sip_test import (
     CLINIC,
     LIVEKIT_URL,
     PROJECT,
@@ -32,15 +31,16 @@ from praxima.dev.sip_test import (
     SipTestConversation,
     preflight,
 )
-from praxima.dev.sip_test import ingress as parse_ingress
+from praxima.ai.dev.sip_test import ingress as parse_ingress
+from praxima.ai.legacy.usage import UsageCollector
+from praxima.ai.speech.errors import Stage, recoverable, report
+from praxima.dev.activation import load_development
 from praxima.modules.agents.application.resolver import ClinicResolver, PostgresResolutionRepository
 from praxima.modules.engagement.application.sessions import (
     CallContext,
     CallOrchestrator,
     CallSessionService,
 )
-from praxima.runtime.usage import UsageCollector
-from praxima.runtime.voice_errors import Stage, recoverable, report
 from praxima.shared.db.pool import RuntimeDatabase
 from praxima.shared.db.settings import DatabaseSettings
 

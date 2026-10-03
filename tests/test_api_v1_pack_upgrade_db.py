@@ -97,7 +97,7 @@ def test_upgrade_to_a_newer_compatible_version(api):
 
 
 def test_suspended_organization_is_locked_but_kept(api, monkeypatch):
-    from praxima.runtime.release.loader import LoadedRelease, NoRelease, load_release
+    from praxima.ai.release.loader import LoadedRelease, NoRelease, load_release
 
     monkeypatch.setenv("PRAXIMA_RUNTIME_DATABASE_URL", URL)
     app, _, browser, headers, org, ws = setup(api)

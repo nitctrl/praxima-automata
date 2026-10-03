@@ -13,8 +13,7 @@ import psycopg
 from dotenv import dotenv_values
 from livekit import api
 
-from praxima.dev.activation import development_settings, load_development, verify_history
-from praxima.dev.sip_test import (
+from praxima.ai.dev.sip_test import (
     CLINIC,
     LIVEKIT_URL,
     NUMBER,
@@ -24,7 +23,8 @@ from praxima.dev.sip_test import (
     WORKER,
     preflight,
 )
-from praxima.modules.releases.domain.snapshot import Snapshot
+from praxima.contracts.clinic_snapshot import Snapshot
+from praxima.dev.activation import development_settings, load_development, verify_history
 
 ROOT = Path(__file__).resolve().parents[1]
 

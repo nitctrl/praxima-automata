@@ -30,6 +30,7 @@ from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from praxima.contracts.clinic_snapshot import Snapshot
 from praxima.entrypoints.http.deps import SessionMaker
 from praxima.entrypoints.http.errors import problem_response
 from praxima.entrypoints.http.sessions import RateLimiter, SessionStore
@@ -52,7 +53,6 @@ from praxima.modules.knowledge.domain.documents import (
     DraftSection,
     extract,
 )
-from praxima.modules.releases.domain.snapshot import Snapshot
 from praxima.shared.security.privacy import PiiCipher
 
 logger = logging.getLogger(__name__)

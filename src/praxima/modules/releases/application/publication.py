@@ -10,8 +10,8 @@ from uuid import UUID
 
 from psycopg import AsyncConnection
 
+from praxima.contracts.clinic_snapshot import Snapshot
 from praxima.modules.iam.infrastructure.staff import StaffRepository
-from praxima.modules.releases.domain.snapshot import Snapshot
 
 
 @dataclass(frozen=True)

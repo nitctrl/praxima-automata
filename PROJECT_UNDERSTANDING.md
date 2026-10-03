@@ -129,12 +129,12 @@ Nothing can be answered until a manager has published a version. See section 7.
 ### Step 1. The worker is already running
 
 `uv run src/agent.py start` (phone) or `console` (local mic) starts a LiveKit worker named
-`inbound-agent` (`src/praxima/entrypoints/voice_worker.py:205-214`). At startup it **prewarms** the Silero VAD model once
-per process (`src/praxima/entrypoints/voice_worker.py:114-118`).
+`inbound-agent` (`src/praxima/ai/worker/main.py:205-214`). At startup it **prewarms** the Silero VAD model once
+per process (`src/praxima/ai/worker/main.py:114-118`).
 
 ### Step 2. A call arrives and the worker joins the room
 
-`entrypoint()` (`src/praxima/entrypoints/voice_worker.py:121`) runs for each call:
+`entrypoint()` (`src/praxima/ai/worker/main.py:121`) runs for each call:
 
 1. `ctx.connect()` joins the LiveKit room.
 2. `ctx.wait_for_participant()` waits for the caller, so the greeting is not clipped.
@@ -143,10 +143,10 @@ per process (`src/praxima/entrypoints/voice_worker.py:114-118`).
 
 ### Step 3. Authorization gate: who may see clinic data?
 
-`src/praxima/entrypoints/voice_worker.py:160-173`:
+`src/praxima/ai/worker/main.py:160-173`:
 
 - **Console / mic session:** authorized automatically.
-- **Phone call:** authorized only if `clinic_ingress()` (`src/praxima/dev/sip_test.py:73`) accepts it.
+- **Phone call:** authorized only if `clinic_ingress()` (`src/praxima/ai/dev/sip_test.py:73`) accepts it.
   It requires a native SIP participant whose `sip.trunkPhoneNumber`, `sip.trunkID` and
   `sip.ruleID` **exactly match three constants hard-coded in `sip_test.py`**, and a safe
   `sip.callID`. Anything else is rejected and the call gets **no clinic knowledge**.
@@ -155,7 +155,7 @@ The caller ID is never used for authorization. Only LiveKit's own trusted attrib
 
 ### Step 4. Load the knowledge from the database (the only DB read)
 
-`load_agent_knowledge()` (`src/praxima/runtime/tools/agent_knowledge.py:63-96`):
+`load_agent_knowledge()` (`src/praxima/ai/legacy/agent_knowledge.py:63-96`):
 
 1. Read `SUPABASE_PROJECT_REF` from `.env` and `DATABASE_URL` from **`.env.runtime`**.
 2. `DatabaseSettings.validate()` (`src/praxima/shared/db/settings.py`) rejects anything that is not this
@@ -171,7 +171,7 @@ The caller ID is never used for authorization. Only LiveKit's own trusted attrib
    WHERE clinic_id = %s AND status = 'published';
    ```
 6. Require **exactly one** row, validate it with the pydantic `Snapshot` model
-   (`src/praxima/modules/releases/domain/snapshot.py:173`), and keep it in memory. Close the database connection.
+   (`src/praxima/contracts/clinic_snapshot.py:173`), and keep it in memory. Close the database connection.
 7. Overall timeout is 20 seconds. **Any failure** returns an empty `AgentKnowledge(None)`.
 
 If that fails, the call still connects. The agent's instructions become: *"Clinic knowledge is
@@ -179,7 +179,7 @@ unavailable. Do not invent clinic facts."* It never falls back to made-up or dem
 
 ### Step 5. Build the agent and start the session
 
-`VoiceAgent` (`src/praxima/entrypoints/voice_worker.py:48-97`) is configured with:
+`VoiceAgent` (`src/praxima/ai/worker/main.py:48-97`) is configured with:
 
 | Slot | Value |
 | --- | --- |
@@ -192,7 +192,7 @@ unavailable. Do not invent clinic facts."* It never falls back to made-up or dem
 | Endpointing | Phone 0.45-1.2 s; mic 0.21-0.75 s (phone is more patient) |
 
 Then `on_enter()` makes the agent **speak first**: a one-sentence warm greeting in Hindi
-unless the caller speaks English (`src/praxima/entrypoints/voice_worker.py:99-107`).
+unless the caller speaks English (`src/praxima/ai/worker/main.py:99-107`).
 
 ### Step 6. Each turn of conversation
 
@@ -227,7 +227,7 @@ No database query happens in this loop. Retrieval runs against the snapshot alre
 ### 5.1 The system prompt
 
 Rendered from `src/praxima/packs/clinic/prompts/agent_system_prompt.j2` by `render_prompt()`
-(`src/praxima/runtime/prompting.py`). It injects the clinic name, timezone, supported languages, the
+(`src/praxima/ai/prompts/render.py`). It injects the clinic name, timezone, supported languages, the
 **current clinic-local time**, the published **emergency message**, and a list of current and
 scheduled **live updates**.
 
@@ -248,7 +248,7 @@ Its main rules for the model:
 
 ### 5.2 The one tool: `search_clinic_knowledge`
 
-Defined in `src/praxima/runtime/tools/agent_knowledge.py:51-60`. It takes the question and calls
+Defined in `src/praxima/ai/legacy/agent_knowledge.py:51-60`. It takes the question and calls
 `HybridRetriever.result()` (`src/praxima/modules/knowledge/application/retrieval.py:75`), which:
 
 1. Rejects empty questions or ones over 500 characters.
@@ -410,6 +410,14 @@ Details worth knowing:
 
 ---
 
+## 8b. Where the voice agent's code lives
+
+All AI code is in `src/praxima/ai/` (worker, release, tools, prompts, speech; `legacy/` and
+`dev/` for the old single-clinic path). The backend never imports it; it shares only
+`praxima/contracts/` (the release snapshot shape) and pure helpers in `shared/kernel/`
+(`text.py`, `safety.py`, `slots.py`). `tests/test_architecture.py` enforces the split. See
+CLAUDE.md §4.7.
+
 ## 9. [B] The new platform: `/api/v1`
 
 ### 9.1 Shape: a modular monolith
@@ -520,8 +528,8 @@ for RLS policies, triggers and partitions, and `alembic check` must show no drif
   (`runtime_slot_context`). Revoked access marks the connection "error" so staff reconnect.
   Event title "<label>: <name>", description holds the phone: shared with the entry's own
   calendar only.
-- **Call handling around the model** (`runtime/call_flow.py`, `entrypoints/voice_worker.py`):
-  each caller turn is classified by `runtime/policy/safety.classify` before the model sees
+- **Call handling around the model** (`ai/worker/call_flow.py`, `ai/worker/main.py`):
+  each caller turn is classified by `shared/kernel/safety.classify` before the model sees
   it: emergencies get the release's emergency message without the model (StopResponse);
   medical and prompt-injection turns get a guard system message; the route is recorded
   content-free as a `safety_router` tool event. Knowledge loads while audio starts; a generic
@@ -532,7 +540,7 @@ for RLS policies, triggers and partitions, and `alembic check` must show no drif
   the caller to repeat. Speech-to-text detects each utterance's language and the voice
   follows confident switches. SIP calls are looked up with `releases.live_release_for_call`
   (migration 0015): a number with a `trusted_trunk_id` is refused on any other trunk.
-- **Booking on calls** (`runtime/release/knowledge.py`, migration 0013): `find_open_slots`
+- **Booking on calls** (`ai/tools/release_tools.py`, migration 0013): `find_open_slots`
   computes open slots from the pinned release's published hours (`lookup.entity_hours`) minus
   busy ranges from `scheduling.runtime_slot_context`; `book_slot` checks the time is one of
   them, encrypts the name and phone, and calls `scheduling.runtime_book_slot` (held or
@@ -578,8 +586,8 @@ Optional pack fields keep industry wording out of core code:
 - `plural_name` on entity types, e.g. "Properties"
 - `callback_kind`, the request type the generic `request_callback` tool creates
 - `agent_defaults`, starter greeting, emergency and fallback wording
-- `prompts/release_system_prompt.j2`, the voice prompt with the pack's own rules. Without it,
-  calls use the domain-neutral `packs/_template/prompts/release_system_prompt.j2`.
+- `ai/prompts/templates/<pack>.j2`, the voice prompt with the pack's own rules. Without it,
+  calls use the domain-neutral `ai/prompts/templates/default.j2`.
 
 The console reads all of this from `GET /workspaces/{id}/pack`. Clinic is at 1.1.0 (1.0.0
 workspaces keep working with fallbacks).
@@ -642,7 +650,7 @@ a draft → published → archived status.
 ### 9.9 Agent releases (step 4a)
 
 - **What a release is:** `releases.agent_releases` holds one immutable **snapshot** per
-  published version of an agent (schema version 4, model in `releases/domain/agent_snapshot.py`).
+  published version of an agent (schema version 4, model in `contracts/agent_snapshot.py`).
 - **What goes in:** only published, current content:
   - the agent's messages and enabled tools
   - workspace settings and pack
@@ -676,7 +684,7 @@ pipeline (STT, LLM, TTS, VAD, turn detection, endpointing) is unchanged. At call
 
 1. **The trusted called number.** It's `sip.trunkPhoneNumber` from a native LiveKit SIP
    participant; bridged calls have none, and console mode uses `PRAXIMA_CONSOLE_NUMBER`.
-2. **One lookup.** `runtime/release/loader.py` calls `releases.live_release_for_number` with
+2. **One lookup.** `ai/release/loader.py` calls `releases.live_release_for_number` with
    one read-only query. The function comes from migration 0008 and runs as SECURITY DEFINER:
    - It sets `app.called_number`, so the phone-number RLS policy exposes just that number.
    - It resolves the agent, sets `app.workspace_id`, and returns the live snapshot.
@@ -684,7 +692,7 @@ pipeline (STT, LLM, TTS, VAD, turn detection, endpointing) is unchanged. At call
    - It's reached with `PRAXIMA_RUNTIME_DATABASE_URL`, a login that may run only this
      function (`scripts/voice_runtime.py`).
 3. **Pinning.** The snapshot is validated (schema 4 only) and pinned to the call in memory.
-   `runtime/release/knowledge.py` exposes only the tools the release enables:
+   `ai/tools/release_tools.py` exposes only the tools the release enables:
    - `find_entities`
    - `get_entity`: details, links and fees
    - `get_availability`: weekly hours for a date with exceptions applied, in the workspace
@@ -693,8 +701,8 @@ pipeline (STT, LLM, TTS, VAD, turn detection, endpointing) is unchanged. At call
      entries (at most two; sections tagged with an entry the question names rank higher)
    - `get_announcements`
 
-   The answers are computed in `runtime/release/lookup.py`, as pure functions.
-4. **Prompt and greeting.** The prompt is `packs/clinic/prompts/release_system_prompt.j2`,
+   The answers are computed in `ai/release/lookup.py`, as pure functions.
+4. **Prompt and greeting.** The prompt is `ai/prompts/templates/clinic.j2`,
    with the same safety rules plus tool guidance. The agent's published greeting is spoken word
    for word.
 
@@ -753,10 +761,10 @@ today:
 
 | Module | Purpose | Status |
 | --- | --- | --- |
-| `modules/engagement/application/sessions.py`, `runtime/tools/session_tools.py`, `runtime/usage.py` | Pinned call sessions, usage units, finalization (legacy schema) | Tested, not wired to the live agent |
+| `modules/engagement/application/sessions.py`, `ai/legacy/session_tools.py`, `ai/legacy/usage.py` | Pinned call sessions, usage units, finalization (legacy schema) | Tested, not wired to the live agent |
 | `modules/engagement/domain/requests.py`, `shared/security/privacy.py` | Legacy appointment/callback requests, encrypted PII | Tested, not wired |
-| `runtime/policy/safety.py` | Deterministic medical / emergency / prompt-injection routing | Used by dev paths, not the live LLM path |
-| `modules/catalog/domain/knowledge.py`, `runtime/tools/tools.py`, `runtime/questions.py` | Structured lookups over doctors, fees, schedules, FAQs | Used by the fictional console test, **not** by the live RAG tool |
+| `shared/kernel/safety.py` | Deterministic medical / emergency / prompt-injection routing | Used by dev paths, not the live LLM path |
+| `modules/catalog/domain/knowledge.py`, `ai/legacy/tools.py`, `ai/legacy/questions.py` | Structured lookups over doctors, fees, schedules, FAQs | Used by the fictional console test, **not** by the live RAG tool |
 | `dev/` (`dev_voice.py`, `dev_conversation.py`, `sip_test.py`) | Deterministic console harness; fictional SIP pilot | Dev only |
 | New platform (section 9) | CRM, catalog, knowledge, agents on the new schema | Used by `/api/v1` and the console; **not** by calls until step 4 |
 
@@ -797,7 +805,7 @@ Consequences:
 3. **The embedding model is English.** `BAAI/bge-small-en-v1.5` is the default, so semantic
    ranking on Hindi questions is likely weaker than lexical. This is an inference from the
    model name; it wasn't measured.
-4. **The phone path is locked to hard-coded IDs** (number, trunk, rule) in `dev/sip_test.py`.
+4. **The phone path is locked to hard-coded IDs** (number, trunk, rule) in `ai/dev/sip_test.py`.
    Changing the phone number or trunk requires editing code; in the platform this becomes
    `agents.phone_numbers`.
 5. **Console mode needs `.env.runtime`.** Without the restricted runtime credentials created by
@@ -857,10 +865,11 @@ run `uv run alembic check` for migration drift.
 
 | Path | Role |
 | --- | --- |
-| `src/agent.py` → `src/praxima/entrypoints/voice_worker.py` | Worker entrypoint, `VoiceAgent`, providers, lifecycle (AI code: unchanged) |
-| `src/praxima/runtime/` | Voice runtime: tools, prompting, speech, policy, fallbacks (AI code) |
+| `src/agent.py` → `src/praxima/ai/worker/main.py` | Worker entrypoint, `VoiceAgent`, providers, lifecycle (AI code: unchanged) |
+| `src/praxima/ai/` | Voice agent (AI code): worker, release, tools, prompts, speech; legacy/ and dev/ for the old path |
+| `src/praxima/contracts/` | Shapes the backend and the voice agent share (release snapshot, legacy clinic snapshot) |
 | `src/praxima/modules/knowledge/application/retrieval.py`, `domain/documents.py` | Legacy hybrid retrieval and document extraction used by calls |
-| `src/praxima/modules/releases/domain/snapshot.py`, `application/publication.py` | Legacy snapshot model and preview/publish |
+| `src/praxima/contracts/clinic_snapshot.py`, `application/publication.py` | Legacy snapshot model and preview/publish |
 | `src/praxima/entrypoints/api.py` | `create_app()`: middleware, legacy `/api/*`, mounts `/api/v1` |
 | `src/praxima/entrypoints/http/` | Shared HTTP plumbing: `deps.py` (sessions, access, paging, vault), `errors.py`, `responses.py` (`Page`, `Problem`), `v1.py` (mounts routers) |
 | `src/praxima/modules/<m>/{api,application,domain,infrastructure}` | New platform modules (section 9.1) |

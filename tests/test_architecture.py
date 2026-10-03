@@ -9,11 +9,17 @@ IO_LIBRARIES = ("psycopg", "httpx", "qdrant_client", "google", "livekit", "faste
 # Temporary violations left by the step-1 move (no behaviour change). Remove an entry when
 # the code is fixed; the test fails if an entry is stale or a new violation appears.
 KNOWN = {
-    ("praxima.entrypoints.voice_worker", "praxima.dev.sip_test"),
-    ("praxima.runtime.tools.agent_knowledge", "praxima.dev.development"),
-    ("praxima.modules.engagement.domain.requests", "praxima.runtime.policy.safety"),
-    ("praxima.modules.engagement.application.sessions", "praxima.runtime.policy.safety"),
+    ("praxima.ai.worker.main", "praxima.ai.dev.sip_test"),
+    ("praxima.ai.legacy.agent_knowledge", "praxima.dev.development"),
+    # The dashboard's legacy grounded answers use the legacy voice prompt; both go together.
+    ("praxima.integrations.llm.gemini", "praxima.ai.legacy.prompting"),
 }
+# The voice agent's release path imports only `praxima.ai`, `praxima.contracts` and
+# `praxima.shared` (it meets the backend through the release snapshot and the database's
+# runtime functions). The legacy path and dev tools still lean on backend modules; they are
+# exempt until the legacy path is removed.
+AI_LEGACY = ("praxima.ai.legacy", "praxima.ai.dev")
+AI_ALLOWED = ("praxima.ai", "praxima.contracts", "praxima.shared")
 
 
 def _imports() -> dict[str, set[str]]:
@@ -34,14 +40,25 @@ def _violations() -> set[tuple[str, str]]:
     bad = set()
     for module, targets in _imports().items():
         for target in targets:
-            prod = not module.startswith("praxima.dev")
+            prod = not module.startswith(("praxima.dev", "praxima.ai.dev"))
+            if not module.startswith("praxima.ai") and target.startswith("praxima.ai"):
+                bad.add((module, target))  # the backend never imports the voice agent
+            if (
+                module.startswith("praxima.ai")
+                and not module.startswith(AI_LEGACY)
+                and target.startswith("praxima.")
+                and not target.startswith(AI_ALLOWED)
+            ):
+                bad.add((module, target))  # the agent's release path never imports the backend
+            if prod and target.startswith("praxima.ai.dev"):
+                bad.add((module, target))  # rule 7: production never imports dev tools
             in_modules = module.startswith("praxima.modules.")
             domain = ".domain." in f"{module}." and in_modules
             if prod and target.startswith("praxima.dev"):
                 bad.add((module, target))  # rule 7: production never imports dev/
             router = in_modules and ".api." in f"{module}."
             http_plumbing = target.startswith("praxima.entrypoints.http")
-            below = target.startswith(("praxima.runtime", "praxima.entrypoints"))
+            below = target.startswith(("praxima.ai", "praxima.entrypoints"))
             if in_modules and below and not (router and http_plumbing):
                 bad.add((module, target))  # modules sit below the runtime and entrypoints
             if (
@@ -62,7 +79,7 @@ def _violations() -> set[tuple[str, str]]:
             api_side = module == "praxima.entrypoints.api" or ".api." in f"{module}."
             if api_side and target.startswith("livekit"):
                 bad.add((module, target))  # rule 5
-            if module.startswith("praxima.runtime") and target.startswith("fastapi"):
+            if module.startswith("praxima.ai") and target.startswith("fastapi"):
                 bad.add((module, target))  # rule 5
             layer = f"{module}."
             # entrypoints.http owns the per-request session that routers receive.
@@ -110,7 +127,7 @@ def test_voice_worker_loads_no_platform_code():
     import sys
 
     probe = (
-        "import json, sys; import praxima.entrypoints.voice_worker; "
+        "import json, sys; import praxima.ai.worker.main; "
         "prefixes = ('praxima', 'sqlalchemy'); "
         "print(json.dumps(sorted(m for m in sys.modules if m.startswith(prefixes))))"
     )

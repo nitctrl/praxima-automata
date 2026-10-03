@@ -67,7 +67,6 @@ def test_attribute_errors_never_echo_values():
 @pytest.mark.parametrize("key", loader.available())
 def test_every_pack_is_complete(key):
     """Pack parity: each shipped pack carries everything core code needs, as data."""
-    from pathlib import Path
 
     pack = loader.load(key)
     assert Pack.from_payload(pack.payload()).checksum() == pack.checksum()
@@ -76,8 +75,10 @@ def test_every_pack_is_complete(key):
     assert pack.agent_defaults is not None
     assert all(t.plural_name for t in pack.entity_types)
     assert pack.document_categories and pack.announcement_kinds
-    prompt = Path(loader.PACKS_DIR, key, "prompts", "release_system_prompt.j2")
-    assert prompt.is_file(), "each pack ships its own voice prompt"
+    from praxima.ai.prompts.render import TEMPLATES
+
+    # Prompts are AI behaviour: they live in praxima/ai/prompts/templates/<pack key>.j2.
+    assert (TEMPLATES / f"{key}.j2").is_file(), "each shipped pack has its own voice prompt"
 
 
 @pytest.mark.parametrize("key", loader.available())
@@ -85,8 +86,8 @@ def test_every_pack_renders_its_own_prompt(key):
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
-    from praxima.modules.releases.domain.agent_snapshot import AgentSnapshot
-    from praxima.runtime.prompting import render_release_prompt
+    from praxima.ai.prompts.render import render_release_prompt
+    from praxima.contracts.agent_snapshot import AgentSnapshot
 
     pack = loader.load(key)
     snapshot = AgentSnapshot.model_validate(

@@ -12,8 +12,8 @@ from uuid import UUID, uuid4
 import psycopg
 from dotenv import dotenv_values
 
+from praxima.contracts.clinic_snapshot import Snapshot
 from praxima.dev.development import fixture_id
-from praxima.modules.releases.domain.snapshot import Snapshot
 from praxima.shared.db.settings import ConfigurationError, DatabaseSettings
 from praxima.shared.security.privacy import PiiCipher
 

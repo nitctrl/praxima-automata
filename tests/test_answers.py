@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from test_structured_knowledge import content  # noqa: F401
 
 import praxima.integrations.llm.gemini as answers
-from praxima.modules.releases.domain.snapshot import Snapshot
+from praxima.contracts.clinic_snapshot import Snapshot
 
 
 def test_grounded_answer_prompt(content, monkeypatch):  # noqa: F811

@@ -8,7 +8,7 @@ from livekit.agents.voice import Agent
 
 
 def test_original_voice_hooks_are_not_overridden():
-    from praxima.entrypoints.voice_worker import VoiceAgent
+    from praxima.ai.worker.main import VoiceAgent
 
     assert VoiceAgent.tts_node is Agent.tts_node
     assert VoiceAgent.llm_node is Agent.llm_node
@@ -17,7 +17,7 @@ def test_original_voice_hooks_are_not_overridden():
 
 
 def test_agent_starts_without_tools_while_knowledge_loads(monkeypatch):
-    from praxima.entrypoints import voice_worker as agent
+    from praxima.ai.worker import main as agent
 
     captured = {}
     monkeypatch.setattr(agent.Agent, "__init__", lambda self, **kw: captured.update(kw))
@@ -36,13 +36,13 @@ def test_agent_starts_without_tools_while_knowledge_loads(monkeypatch):
 
 
 def test_no_clinic_orchestration_or_custom_speech_imported_by_agent():
-    worker = Path(__file__).resolve().parents[1] / "src/praxima/entrypoints/voice_worker.py"
+    worker = Path(__file__).resolve().parents[1] / "src/praxima/ai/worker/main.py"
     tree = ast.parse(worker.read_text())
     modules = {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
     assert not modules.intersection(
         {
-            "praxima.dev.dev_voice",
+            "praxima.ai.dev.dev_voice",
             "praxima.modules.engagement.application.sessions",
-            "praxima.runtime.usage",
+            "praxima.ai.legacy.usage",
         }
     )

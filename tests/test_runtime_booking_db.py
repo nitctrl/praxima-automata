@@ -60,8 +60,8 @@ def live_agent(api, monkeypatch):  # type: ignore[no-untyped-def]
 
 
 def test_agent_offers_and_books_open_slots(api, monkeypatch):
-    from praxima.runtime.release.knowledge import ReleaseKnowledge
-    from praxima.runtime.release.loader import load_release
+    from praxima.ai.release.loader import load_release
+    from praxima.ai.tools.release_tools import ReleaseKnowledge
 
     browser, headers, base, _, doctor = live_agent(api, monkeypatch)
     day = tomorrow().isoformat()
@@ -125,8 +125,8 @@ def test_agent_offers_and_books_open_slots(api, monkeypatch):
 
 
 def test_instant_booking_when_staff_confirmation_is_off(api, monkeypatch):
-    from praxima.runtime.release.knowledge import ReleaseKnowledge
-    from praxima.runtime.release.loader import load_release
+    from praxima.ai.release.loader import load_release
+    from praxima.ai.tools.release_tools import ReleaseKnowledge
 
     browser, headers, base, _, _ = live_agent(api, monkeypatch)
     settings = browser.patch(

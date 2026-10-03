@@ -5,7 +5,7 @@ import copy
 import pytest
 from pydantic import ValidationError
 
-from praxima.modules.releases.domain.agent_snapshot import (
+from praxima.contracts.agent_snapshot import (
     AgentSnapshot,
     diff,
     digest_of,

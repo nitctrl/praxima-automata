@@ -11,8 +11,8 @@ from uuid import UUID, uuid4
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from typing_extensions import Self
 
-from praxima.modules.releases.domain.snapshot import normalize
-from praxima.runtime.policy.safety import classify
+from praxima.shared.kernel.safety import classify
+from praxima.shared.kernel.text import normalize
 
 
 class RequestDetails(BaseModel):

@@ -8,9 +8,9 @@ from uuid import UUID, uuid4
 import pytest
 from test_dev_voice import metric
 
+from praxima.ai.legacy.usage import UsageCollector
 from praxima.dev.development import fixture_id
 from praxima.modules.engagement.application.sessions import CallSessionService
-from praxima.runtime.usage import UsageCollector
 
 
 class ConnectionDatabase:

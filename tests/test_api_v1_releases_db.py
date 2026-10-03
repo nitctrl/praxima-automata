@@ -181,7 +181,7 @@ def test_roles_isolation_and_immutability(api):
 
 def test_voice_runtime_loads_the_live_release_for_the_called_number(api, monkeypatch):
     """The worker's path: trusted called number → agent → live release (one function call)."""
-    from praxima.runtime.release.loader import LoadedRelease, NoRelease, load_release
+    from praxima.ai.release.loader import LoadedRelease, NoRelease, load_release
 
     monkeypatch.setenv("PRAXIMA_RUNTIME_DATABASE_URL", URL)
     app, engine, browser, headers, _, ws = setup(api)
@@ -230,9 +230,9 @@ def test_calls_and_requests_are_recorded_for_staff(api, monkeypatch):
     import json
     import os
 
+    from praxima.ai.release.loader import load_release
+    from praxima.ai.tools.release_tools import ReleaseKnowledge
     from praxima.modules.engagement import Vault
-    from praxima.runtime.release.knowledge import ReleaseKnowledge
-    from praxima.runtime.release.loader import load_release
     from praxima.shared.security.lookup import PhoneLookup
     from praxima.shared.security.privacy import PiiCipher
 
@@ -325,7 +325,7 @@ def test_calls_and_requests_are_recorded_for_staff(api, monkeypatch):
 
 def test_sip_calls_must_arrive_on_the_numbers_trusted_trunk(api, monkeypatch):
     """Migration 0015: a number pinned to a trunk is refused on any other trunk."""
-    from praxima.runtime.release.loader import LoadedRelease, NoRelease, load_release
+    from praxima.ai.release.loader import LoadedRelease, NoRelease, load_release
 
     monkeypatch.setenv("PRAXIMA_RUNTIME_DATABASE_URL", URL)
     app, engine, browser, headers, _, ws = setup(api)

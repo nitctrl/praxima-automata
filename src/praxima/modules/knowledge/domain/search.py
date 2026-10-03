@@ -6,7 +6,7 @@ same tokenizer the voice agent uses, and the rest are OR-ed as prefixes so "sund
 matches "sundays". Ranking (ts_rank) puts passages matching more of the words first.
 """
 
-from praxima.modules.knowledge.domain.documents import tokens
+from praxima.shared.kernel.text import tokens
 
 MAX_TERMS = 12
 # Characters with meaning in tsquery syntax; stripped so a question can never be an operator.

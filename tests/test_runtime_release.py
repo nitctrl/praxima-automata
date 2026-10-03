@@ -4,10 +4,10 @@ import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from praxima.modules.releases.domain.agent_snapshot import AgentSnapshot
-from praxima.runtime.prompting import render_release_prompt
-from praxima.runtime.release import lookup
-from praxima.runtime.release.loader import LoadedRelease, NoRelease, interpret
+from praxima.ai.prompts.render import render_release_prompt
+from praxima.ai.release import lookup
+from praxima.ai.release.loader import LoadedRelease, NoRelease, interpret
+from praxima.contracts.agent_snapshot import AgentSnapshot
 
 IST = ZoneInfo("Asia/Kolkata")
 # Monday 2026-10-19, 11:00 in Mumbai.
@@ -307,15 +307,13 @@ def test_prompt_lists_request_types_only_when_allowed():
 
 
 def test_prompt_and_tools_follow_the_pack():
-    from praxima.runtime.prompting import release_template
-    from praxima.runtime.release.knowledge import ReleaseKnowledge
+    from praxima.ai.prompts.render import release_template
+    from praxima.ai.tools.release_tools import ReleaseKnowledge
 
-    assert release_template("clinic") == "clinic/prompts/release_system_prompt.j2"
-    assert release_template("real_estate") == "real_estate/prompts/release_system_prompt.j2"
-    assert (
-        release_template("hotel") == "_template/prompts/release_system_prompt.j2"
-    )  # no own prompt
-    assert release_template("../etc") == "_template/prompts/release_system_prompt.j2"
+    assert release_template("clinic") == "clinic.j2"
+    assert release_template("real_estate") == "real_estate.j2"
+    assert release_template("hotel") == "default.j2"  # no own prompt
+    assert release_template("../etc") == "default.j2"
     other = AgentSnapshot.model_validate(RAW | {"pack": {"key": "hotel", "version": "1.0.0"}})
     neutral = render_release_prompt(other, NOW)
     assert "diagnose" not in neutral and "professional advice" in neutral
@@ -422,7 +420,7 @@ def test_sections_tagged_with_a_named_entry_rank_higher():
 
 
 def test_prompt_and_tools_offer_booking_only_when_enabled():
-    from praxima.runtime.release.knowledge import ReleaseKnowledge
+    from praxima.ai.tools.release_tools import ReleaseKnowledge
 
     assert "book_slot" not in render_release_prompt(SNAPSHOT, NOW)
     for pack in ("clinic", "real_estate", "hotel"):

@@ -6,10 +6,10 @@ from uuid import UUID, uuid4
 import pytest
 from test_structured_knowledge import content  # noqa: F401
 
+from praxima.ai.legacy.agent_knowledge import CLINIC, AgentKnowledge, load_agent_knowledge
+from praxima.ai.legacy.prompting import ENVIRONMENT
+from praxima.contracts.clinic_snapshot import Snapshot
 from praxima.modules.agents.application.resolver import ClinicUnavailable
-from praxima.modules.releases.domain.snapshot import Snapshot
-from praxima.runtime.prompting import ENVIRONMENT
-from praxima.runtime.tools.agent_knowledge import CLINIC, AgentKnowledge, load_agent_knowledge
 
 
 @pytest.fixture

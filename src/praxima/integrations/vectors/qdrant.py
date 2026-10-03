@@ -18,7 +18,7 @@ from uuid import UUID
 
 import httpx
 
-from praxima.modules.releases.domain.snapshot import DocumentSection
+from praxima.contracts.clinic_snapshot import DocumentSection
 
 logger = logging.getLogger(__name__)
 

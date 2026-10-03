@@ -7,7 +7,7 @@ import pytest
 from cryptography.exceptions import InvalidTag
 
 from praxima.modules.engagement.domain.requests import ConfirmationState, RequestDetails
-from praxima.runtime.policy.safety import classify, output_allowed, response
+from praxima.shared.kernel.safety import classify, output_allowed, response
 from praxima.shared.security.privacy import PiiCipher
 
 

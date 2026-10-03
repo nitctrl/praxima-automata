@@ -173,7 +173,7 @@ into a service later.
 
 | Process | Entrypoint (target) | Responsibility |
 | --- | --- | --- |
-| Voice runtime | `entrypoints/voice_worker.py` (today `src/agent.py`) | LiveKit worker: resolve agent, load pinned release, run the conversation, tools, safety |
+| Voice runtime | `ai/worker/main.py` (run via the `src/agent.py` shim) | LiveKit worker: resolve agent, load pinned release, run the conversation, tools, safety (§4.7) |
 | HTTP API | `entrypoints/api.py` (wired up in root `main.py`) | Staff dashboard and management API, `/api/v1` |
 | Background jobs | `entrypoints/jobs.py` | Retention/erasure, partition maintenance, usage rollups, outbox dispatch, re-indexing |
 | CLI / ops | `scripts/*.py` → `entrypoints/cli.py` | Migrations, seeding packs, provisioning |
@@ -191,8 +191,8 @@ inbound call → resolve phone number → agent → workspace (trusted ingress)
 ```
 
 The hot path does **one indexed read** of the published release per call and keeps it in
-memory. Around the model the call is deterministic (`runtime/call_flow.py`, wired in
-`entrypoints/voice_worker.py`): every caller turn is safety-classified first (emergency →
+memory. Around the model the call is deterministic (`ai/worker/call_flow.py`, wired in
+`ai/worker/main.py`): every caller turn is safety-classified first (emergency →
 the published emergency message, spoken without the model; medical / prompt injection → a
 guard instruction); knowledge loads in parallel with audio (generic greeting after 1.5 s);
 no release → a fixed message and hang-up; silence and maximum duration end the call politely;
@@ -290,15 +290,15 @@ packs/<pack_id>/
 ├── entity_types/*.json      # JSON Schema per entity type (attributes, searchable fields, display)
 ├── work_items/*.json        # JSON Schema per work item kind (payload, stages)
 ├── policy.yaml              # prohibited topics, emergency triggers, refusal/fallback wording
-├── prompts/*.j2             # release_system_prompt.j2 for calls (else packs/_template's)
 ├── tools.yaml               # which generic tools are enabled, with pack-specific descriptions
 ├── labels.yaml              # UI/voice vocabulary ("Doctor", "Property", …)
 ├── seeds/                   # fictional demo data for development and tests
 └── extensions.py            # optional: registered hooks (e.g. speech normalizer), kept tiny
 ```
 
-- Packs ship with the platform: `clinic` and `real_estate` (both built), and `_template`
-  (the domain-neutral default voice prompt) for new ones. Each released pack version is registered in `tenancy.pack_versions`.
+- Packs ship with the platform: `clinic` and `real_estate` (both built). A pack's call prompt
+  is AI behaviour, so it lives in `ai/prompts/templates/<pack key>.j2`; packs without one use
+  `default.j2` (domain-neutral). Each released pack version is registered in `tenancy.pack_versions`.
 - **Installing a pack** into a workspace sets `workspaces.pack_key` / `pack_version` and
   copies the pack's entity types and work item kinds into that workspace's tables. Upgrading
   a pack is an explicit, versioned operation. Release snapshots record the pack key and
@@ -312,6 +312,32 @@ packs/<pack_id>/
 - Adding a new industry means **adding a pack and tests, with no core changes and no
   migrations**. If a core change seems necessary, write an ADR first.
 
+
+### 4.7 Voice agent (`praxima/ai`): kept apart from the backend
+
+```
+ai/
+├── worker/    main.py (LiveKit entrypoint; src/agent.py runs it), call_flow.py (fixed messages,
+│              greeting, silence, limits, language, trusted SIP ingress)
+├── release/   loader.py (pinned release), lookup.py (pure answers), recorder.py (call records)
+├── tools/     release_tools.py (the model's tools: find_entities … book_slot)
+├── prompts/   render.py + templates/<pack>.j2, default.j2
+├── speech/    normalize.py (TTS text), errors.py (provider errors)
+├── legacy/    old single-clinic path (PRAXIMA_VOICE_SOURCE=legacy); remove with it
+└── dev/       fictional voice test tools (never imported by production)
+contracts/     agent_snapshot.py (release snapshot), clinic_snapshot.py (legacy): what both share
+shared/kernel/ text.py, safety.py, slots.py: pure helpers both sides use
+```
+
+- **The backend never imports `praxima.ai`**, and **the agent's release path imports only
+  `praxima.ai`, `praxima.contracts` and `praxima.shared`**. They meet only through the
+  release snapshot (`contracts/agent_snapshot.py`) and the database's SECURITY DEFINER runtime
+  functions (`live_release_for_call`, `runtime_book_slot` …). `tests/test_architecture.py`
+  enforces both; `ai/legacy` and `ai/dev` are exempt until the legacy path is removed, and
+  the only backend → ai import is listed there (`integrations/llm/gemini.py` → legacy prompt).
+- Changing the snapshot shape means changing `contracts/` (both sides) and bumping
+  `schema_version`.
+
 ---
 
 ## 5. Folder structure
@@ -321,10 +347,10 @@ packs/<pack_id>/
 The code lives in `src/praxima/` in the target layout. **Step 1 moved whole files with no
 behaviour change**, so the content is still clinic-specific:
 - `entrypoints/api.py` is still the single ~800-line `create_app()` (the old `dashboard.py`).
-- `entrypoints/voice_worker.py` is the old `src/agent.py`. It is excluded from ruff and mypy,
+- `ai/worker/main.py` (was `entrypoints/voice_worker.py`, originally `src/agent.py`). It is excluded from ruff and mypy,
   as before. `src/agent.py` is now a thin wrapper that calls its `main()`, and stays as the
   LiveKit deploy path.
-- The clinic prompt template is in `packs/clinic/prompts/`.
+- Voice prompt templates are in `ai/prompts/templates/` (the legacy one in `ai/legacy/templates/`).
 - File placement deviates slightly from §5.3 where no split has happened yet:
   - `settings.py` → `shared/db/settings.py`, `db.py` → `shared/db/pool.py`
   - `speech.py` → `runtime/speech/normalize.py`, `rag.py` →
@@ -363,7 +389,7 @@ praxima-automata/
 ├── sip/                           # LiveKit SIP dispatch rules
 ├── scripts/                       # thin wrappers around entrypoints/cli.py
 ├── src/
-│   ├── agent.py                   # KEEP as a shim → praxima.entrypoints.voice_worker (deploy path)
+│   ├── agent.py                   # KEEP as a shim → praxima.ai.worker.main (deploy path)
 │   └── praxima/
 │       ├── shared/                # shared kernel, no business rules
 │       │   ├── kernel/            # ids (UUIDv7), time/clock, money, errors, result types
@@ -416,6 +442,9 @@ praxima-automata/
 ```
 
 ### 5.3 Migration map (original `src/clinic` → target)
+
+Historical. `runtime/` and the voice worker have since moved to `praxima/ai/` (§4.7); the
+safety classifier is `shared/kernel/safety.py` and the snapshots are in `contracts/`.
 
 | Current (`src/clinic/…`) | Target (`src/praxima/…`) |
 | --- | --- |

@@ -17,7 +17,8 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from praxima.modules.releases.domain.snapshot import DocumentSection, normalize
+from praxima.contracts.clinic_snapshot import DocumentSection
+from praxima.shared.kernel.text import normalize, tokens
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 20 * 1024 * 1024
@@ -43,13 +44,6 @@ MIME_TYPES = {
     ".md": "text/markdown",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
-_STOPWORDS = frozenset(
-    """a an and are as at be by do does for from has have how i in is it its me my of on or our
-    tell that the their there they this to was we what when where which who why will with you your
-    ka ke ki ko kya kaun kaha kab hai hain ho me mein se aur ya bhi ye yeh wo woh
-    का के की को क्या कौन कहाँ कब है हैं हो में से और या भी यह वह""".split()
-)
-_TITLES = frozenset("dr drs doctor prof professor mr mrs ms डॉ डा डॉक्टर श्री श्रीमती".split())
 _TAG = re.compile(r"<[^>\n]{0,200}>")
 _IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 _LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
@@ -84,13 +78,6 @@ class Extraction(BaseModel):
     warnings: tuple[str, ...]
 
 
-def tokens(text: str) -> list[str]:
-    # normalize() already separates words and keeps combining marks, so Devanagari words
-    # survive intact; a letter-class regex would split them at every matra.
-    return [
-        t for t in normalize(text).split()
-        if t not in _STOPWORDS and t not in _TITLES and len(t) > 1
-    ]
 
 
 def _clean(line: str) -> str:

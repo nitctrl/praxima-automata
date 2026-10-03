@@ -20,16 +20,16 @@ from livekit.agents import llm, stt, tts, vad
 from livekit.agents.metrics import LLMMetrics, STTMetrics, TTSMetrics, VADMetrics
 from test_structured_knowledge import content as knowledge_content  # noqa: F401
 
-from praxima.dev.dev_conversation import DevelopmentConversation, Reply
-from praxima.dev.dev_voice import DevelopmentVoiceAgent
-from praxima.dev.fallback_audio import FALLBACK, frames, load_audio
+from praxima.ai.dev.dev_conversation import DevelopmentConversation, Reply
+from praxima.ai.dev.dev_voice import DevelopmentVoiceAgent
+from praxima.ai.dev.fallback_audio import FALLBACK, frames, load_audio
+from praxima.ai.legacy.usage import UsageCollector, usage_event
+from praxima.contracts.clinic_snapshot import Snapshot
 from praxima.modules.agents.application.resolver import ClinicScope
 from praxima.modules.catalog.domain.knowledge import StructuredKnowledge
 from praxima.modules.engagement.application import sessions
 from praxima.modules.engagement.application.sessions import CallContext, CallOrchestrator
-from praxima.modules.releases.domain.snapshot import Snapshot
-from praxima.runtime.policy.safety import classify, response
-from praxima.runtime.usage import UsageCollector, usage_event
+from praxima.shared.kernel.safety import classify, response
 from praxima.shared.security.privacy import PiiCipher
 
 NOW = datetime(2026, 9, 21, 5, tzinfo=timezone.utc)

@@ -8,8 +8,8 @@ from typing import Any
 from google import genai
 from google.genai import types
 
-from praxima.modules.releases.domain.snapshot import Snapshot
-from praxima.runtime.prompting import render_prompt
+from praxima.ai.legacy.prompting import render_prompt
+from praxima.contracts.clinic_snapshot import Snapshot
 
 GroundedAnswerer = Callable[[str, Snapshot, Sequence[dict[str, Any]]], Awaitable[str]]
 
