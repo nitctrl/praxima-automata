@@ -27,6 +27,9 @@ GENERIC_TOOLS = frozenset(
         "create_work_item",
         "request_callback",
         "transfer_to_human",
+        # Slot booking (packs with a `booking` block).
+        "find_open_slots",
+        "book_slot",
     }
 )
 
@@ -114,6 +117,16 @@ class AgentDefaults(Strict):
     fallback_message: str = Field(min_length=1, max_length=2000)
 
 
+class BookingSpec(Strict):
+    """Which entries can be booked by the slot, and how long one booking lasts."""
+
+    resource_types: tuple[str, ...] = Field(min_length=1)  # e.g. doctor, sales_agent
+    subject_types: tuple[str, ...] = ()  # what a booking may be about, e.g. service
+    slot_minutes: int = Field(ge=5, le=480)
+    label: str = Field(min_length=1, max_length=60)  # "Appointment", "Site visit"
+    plural_label: str = Field(default="", max_length=60)
+
+
 class Pack(Strict):
     key: str = Field(pattern=KEY)
     version: str = Field(pattern=SEMVER)
@@ -130,6 +143,7 @@ class Pack(Strict):
     # The work item kind the generic "request_callback" tool creates (none: no such tool).
     callback_kind: str | None = None
     agent_defaults: AgentDefaults | None = None
+    booking: BookingSpec | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> "Pack":
@@ -152,6 +166,11 @@ class Pack(Strict):
         for kind in self.work_item_kinds:
             if set(kind.subject_types) - set(types):
                 raise PackError(f"work item kind {kind.key}: unknown subject type")
+        if self.booking is not None:
+            if set(self.booking.resource_types) - set(self.availability_for):
+                raise PackError(f"pack {self.key}: bookable types need opening hours")
+            if set(self.booking.subject_types) - set(types):
+                raise PackError(f"pack {self.key}: booking about an unknown entity type")
         if self.callback_kind is not None and self.callback_kind not in kinds:
             raise PackError(f"pack {self.key}: callback_kind must be one of its work item kinds")
         for name, keys in (
@@ -173,7 +192,11 @@ class Pack(Strict):
 
     def payload(self) -> dict[str, Any]:
         """The full pack as stored in tenancy.pack_versions.manifest."""
-        return self.model_dump(mode="json", by_alias=True)
+        data = self.model_dump(mode="json", by_alias=True)
+        if data.get("booking") is None:
+            # Packs without booking keep the exact payload (and checksum) they had before.
+            data.pop("booking", None)
+        return data
 
     def checksum(self) -> str:
         canonical = json.dumps(self.payload(), sort_keys=True, separators=(",", ":"))

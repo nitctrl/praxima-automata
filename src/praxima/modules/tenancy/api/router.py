@@ -23,6 +23,7 @@ from praxima.modules.tenancy.api.schemas import (
     OrganizationOut,
     OrganizationStatusIn,
     OrganizationSummaryOut,
+    PackBookingOut,
     PackCatalogOut,
     PackDetailsOut,
     PackKey,
@@ -87,6 +88,15 @@ async def read_workspace_pack(access: WorkspaceAccess) -> PackDetailsOut:
         callback_kind=pack.callback_kind,
         agent_defaults=AgentDefaultsOut(**pack.agent_defaults.model_dump())
         if pack.agent_defaults
+        else None,
+        booking=PackBookingOut(
+            label=pack.booking.label,
+            plural_label=pack.booking.plural_label or f"{pack.booking.label}s",
+            resource_types=list(pack.booking.resource_types),
+            subject_types=list(pack.booking.subject_types),
+            slot_minutes=pack.booking.slot_minutes,
+        )
+        if pack.booking
         else None,
         upgrades=[
             PackUpgradeOut(version=u.version, problems=u.problems)

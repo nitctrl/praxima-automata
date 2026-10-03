@@ -13,6 +13,7 @@ if TYPE_CHECKING:  # real imports for type checkers; loaded lazily at runtime
         MemberView,
         PlatformAdminView,
         active_memberships,
+        display_names,
         is_platform_admin,
         member_counts,
         members_page,
@@ -36,6 +37,7 @@ if TYPE_CHECKING:  # real imports for type checkers; loaded lazily at runtime
     )
 
 _EXPORTS = {
+    "display_names": "praxima.modules.iam.application.selectors",
     "MembershipView": "praxima.modules.iam.application.selectors",
     "MemberView": "praxima.modules.iam.application.selectors",
     "PlatformAdminView": "praxima.modules.iam.application.selectors",
@@ -67,6 +69,7 @@ __all__ = [
     "VerifiedIdentity",
     "active_memberships",
     "allowed",
+    "display_names",
     "grant_platform_admin",
     "is_platform_admin",
     "login",

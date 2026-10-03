@@ -18,6 +18,7 @@ if TYPE_CHECKING:  # real imports for type checkers; loaded lazily at runtime
         RuleView,
         availability_of,
         entities_page,
+        entity_names,
         entity_types,
         get_entity,
         published_catalog,
@@ -42,6 +43,7 @@ if TYPE_CHECKING:  # real imports for type checkers; loaded lazily at runtime
     )
 
 _EXPORTS = {
+    "entity_names": "praxima.modules.catalog.application.selectors",
     "EntityTypeView": "praxima.modules.catalog.application.selectors",
     "EntityView": "praxima.modules.catalog.application.selectors",
     "ExceptionView": "praxima.modules.catalog.application.selectors",
@@ -92,6 +94,7 @@ __all__ = [
     "delete_entity",
     "delete_relation",
     "entities_page",
+    "entity_names",
     "entity_types",
     "get_entity",
     "install_pack",

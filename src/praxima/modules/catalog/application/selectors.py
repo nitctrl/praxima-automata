@@ -435,3 +435,13 @@ async def published_catalog(session: AsyncSession, at: datetime) -> PublishedCat
             if known(x.entity_id, x.location_entity_id)
         ],
     )
+
+
+async def entity_names(session: AsyncSession, entity_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    """Display name of each entity, in one query (deleted ones included, for history)."""
+    if not entity_ids:
+        return {}
+    rows = await session.execute(
+        select(Entity.id, Entity.name).where(Entity.id.in_(set(entity_ids)))
+    )
+    return dict(rows.tuples().all())

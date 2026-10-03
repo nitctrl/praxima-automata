@@ -28,7 +28,17 @@ from praxima.shared.db.engine import create_engine
 from praxima.shared.db.settings import ConfigurationError
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMAS = ("iam", "tenancy", "agents", "releases", "catalog", "knowledge", "engagement", "audit")
+SCHEMAS = (
+    "iam",
+    "tenancy",
+    "agents",
+    "releases",
+    "catalog",
+    "knowledge",
+    "engagement",
+    "scheduling",
+    "audit",
+)
 # Platform tables: the API reads them; only migrations and scripts change them.
 READ_ONLY = ("tenancy.pack_versions", "iam.platform_admins")
 # Platform admin writes (migration 0010): each checks for a platform admin in the database.

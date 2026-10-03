@@ -20,6 +20,7 @@ MODULE_SCHEMAS = (
     "catalog",
     "knowledge",
     "engagement",
+    "scheduling",
     "billing",
     "audit",
     "ops",

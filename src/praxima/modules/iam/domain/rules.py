@@ -33,6 +33,10 @@ PERMISSIONS = {
     "pii:erase": "admin",
     "releases:read": "viewer",
     "releases:publish": "manager",
+    # Bookings show callers' names: staff and up.
+    "bookings:read": "staff",
+    "bookings:write": "staff",
+    "bookings:settings": "admin",
 }
 
 

@@ -1,7 +1,7 @@
 # Clinic domain pack. Data only: installing it into a workspace copies these definitions.
 # Bump `version` for any change; workspaces upgrade explicitly.
 key: clinic
-version: 1.1.0
+version: 1.2.0
 name: Clinic
 industry: healthcare
 languages: [hi-IN, en-IN]
@@ -56,3 +56,13 @@ tools:
   - get_announcements
   - create_work_item
   - request_callback
+  - find_open_slots
+  - book_slot
+
+# Bookable by the slot: callers and staff book a doctor's time within published hours.
+booking:
+  resource_types: [doctor]
+  subject_types: [service]
+  slot_minutes: 15
+  label: Appointment
+  plural_label: Appointments

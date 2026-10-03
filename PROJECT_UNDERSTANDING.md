@@ -501,6 +501,15 @@ for RLS policies, triggers and partitions, and `alembic check` must show no drif
   and grant or revoke platform admins. The API login can only read those platform tables, so
   writes go through admin-only SECURITY DEFINER functions (migration 0010, granted by
   `scripts/api_role.py`). The first admin comes from `scripts/platform_admin.py grant <email>`.
+- **Slot booking** (`modules/scheduling`, migration 0012): packs with a `booking` block (clinic
+  1.2.0: doctors, 15 min; real_estate 1.1.0: sales agents, 60 min) make entries bookable.
+  Open slots come from published hours minus live bookings (`shared/kernel/slots.open_slots`,
+  pure and shared with the voice agent). `scheduling.bookings` stores the caller's name, phone
+  and staff note encrypted (plus `phone_last4`); an exclusion constraint refuses overlapping
+  held/confirmed bookings of one entry. Holds expire lazily (`expire_holds` runs before each
+  booking). "Require staff confirmation" (`booking_settings`, default on) decides whether a
+  call's booking is held for staff or confirmed at once. The schedule with names is a POST
+  (`bookings/search`), audited once per view; `…/reveal` shows the phone (audited).
 - **Suspending an organization** (`PATCH /platform/organizations/{id}`): its members get 403
   on every workspace and organization endpoint (`deps._authorize`), `WorkspaceOut` carries
   `organization_status`, and `releases.live_release_for_number` answers

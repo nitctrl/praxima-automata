@@ -52,8 +52,12 @@ Breaking any of these is a bug, even if the tests pass.
 
 **Product safety (every domain)**
 - Agents are **informational and administrative**. They never make commitments on the
-  business's behalf (no confirmed bookings, prices, availability guarantees, or legal,
-  medical or financial advice). They create **work items** that a human confirms.
+  business's behalf (no prices, availability guarantees, or legal, medical or financial
+  advice). They create **work items** that a human confirms.
+- **Bookings are the one exception, and only by the business's choice.** An agent may book
+  a published open slot (`scheduling`). By default it only **holds** the slot and staff
+  confirm it; a workspace admin can turn off "Require staff confirmation" so the agent's
+  booking is confirmed at once. The database refuses overlapping live bookings.
 - Each domain pack declares its own prohibited topics, emergency handling and fallback
   wording. **Safety routing is deterministic** (policy engine plus pack rules), never left to
   the LLM.
@@ -263,6 +267,7 @@ Each module owns **one Postgres schema of the same name** (full table list in
 | `knowledge` | sources, documents and versions (review lifecycle), reviewed sections, derived chunks and embeddings, FAQs, announcements (live updates), retrieval |
 | `releases` | build snapshot → preview → publish → rollback; release snapshot model with `schema_version` and digest |
 | `engagement` | contacts (encrypted), consents, conversations and call events, work item kinds, work items (stage, payload validated per kind, own encrypted PII) and their history, tasks |
+| `scheduling` | booking settings (per workspace), bookings of a bookable entity's slots (held / confirmed / cancelled …, own encrypted name and phone, no overlaps by exclusion constraint); slots come from published hours (`shared/kernel/slots.py`) |
 | `billing` | platform rate cards, workspace rate overrides, usage events, rollups, per-workspace limits |
 | `audit` | append-only audit log |
 | `ops` (shared infra) | transactional outbox, idempotency keys, jobs, schema migrations |
@@ -473,6 +478,11 @@ POST-for-everything) migrate to this. Change the backend and
 | GET / POST / PATCH | `/platform/packs`, `…/{key}/registrations`, `…/{key}/versions/{version}` | ✅ platform admins only (404 otherwise): shipped vs registered packs / register the shipped version (409 if files changed without a version bump) / set `available`, `deprecated` or `withdrawn` |
 | GET | `/platform/organizations` | ✅ every organization with its workspaces and member count (platform admins) |
 | GET, POST / DELETE | `/platform/admins[/{userId}]` | ✅ list / grant by email / revoke (409 for yourself); writes via SECURITY DEFINER functions (migration 0010) |
+| GET, PATCH | `/workspaces/{wsId}/booking-settings` | ✅ "Require staff confirmation", hold time, notice, booking window, slot length (admin to change) |
+| GET | `/workspaces/{wsId}/slots?entity_id=&first_day=&days=` | ✅ open slots of a bookable entry (staff+) |
+| POST | `/workspaces/{wsId}/bookings/search`, `…/bookings/to-confirm` | ✅ the schedule / holds awaiting staff, with callers' names (a POST: viewing names is audited) |
+| POST / GET, PATCH | `/workspaces/{wsId}/bookings[/{id}]` | ✅ staff book an open slot (confirmed, `Idempotency-Key`; 409 if taken) / one booking without names / reschedule `{row_version, starts_at}` |
+| POST | `…/bookings/{id}/confirm`, `…/cancel`, `…/reveal` | ✅ confirm a hold / cancel with a reason / name, phone and note (audited) |
 | GET | `/workspaces/{wsId}/pack` | ✅ the installed pack's vocabulary: entry labels (singular/plural), document categories, live-update kinds, callback kind, starter agent wording |
 | POST | `/organizations/{orgId}/workspaces` | ✅ create a workspace and install its pack (admin+) |
 | GET | `/organizations/{orgId}/workspaces` | |

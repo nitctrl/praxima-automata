@@ -107,6 +107,16 @@ class AgentDefaultsOut(BaseModel):
     fallback_message: str
 
 
+class PackBookingOut(BaseModel):
+    """What can be booked by the slot (absent when the pack has no booking)."""
+
+    label: str
+    plural_label: str
+    resource_types: list[str]
+    subject_types: list[str]
+    slot_minutes: int
+
+
 class PackUpgradeOut(BaseModel):
     """A newer available version of the installed pack; `problems` empty = can upgrade."""
 
@@ -126,6 +136,7 @@ class PackDetailsOut(BaseModel):
     announcement_kinds: list[str]
     callback_kind: str | None
     agent_defaults: AgentDefaultsOut | None
+    booking: PackBookingOut | None = None
     upgrades: list[PackUpgradeOut]
 
 

@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from support.queries import count_queries
 from test_iam_tenancy_db import (  # noqa: F401
+    CLINIC,
     URL,
     Sessions,
     admin_id,
@@ -376,15 +377,7 @@ def test_agents_tools_and_phone_number_routing(admin_id):  # noqa: F811
             )
             view = await agents.get_agent(session, agent_a)
         tools = {t.key: t.enabled for t in view.tools}
-        assert set(tools) == {
-            "find_entities",
-            "get_entity",
-            "get_availability",
-            "search_knowledge",
-            "get_announcements",
-            "create_work_item",
-            "request_callback",
-        }
+        assert set(tools) == set(CLINIC.tools)  # the pack's tools, including slot booking
         assert tools["request_callback"] is False and tools["find_entities"] is True
         assert [n.phone_number for n in view.phone_numbers] == [number]
 

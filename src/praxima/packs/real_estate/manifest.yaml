@@ -2,7 +2,7 @@
 # Data only: installing it into a workspace copies these definitions. Bump `version` for any
 # change; workspaces upgrade explicitly.
 key: real_estate
-version: 1.0.0
+version: 1.1.0
 name: Real estate
 industry: real_estate
 languages: [hi-IN, en-IN]
@@ -58,3 +58,13 @@ tools:
   - get_announcements
   - create_work_item
   - request_callback
+  - find_open_slots
+  - book_slot
+
+# Bookable by the slot: site visits with a sales agent within published hours.
+booking:
+  resource_types: [sales_agent]
+  subject_types: [project, property]
+  slot_minutes: 60
+  label: Site visit
+  plural_label: Site visits

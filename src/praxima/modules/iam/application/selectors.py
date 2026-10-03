@@ -194,3 +194,13 @@ async def member_counts(
         .group_by(Membership.organization_id)
     )
     return {organization_id: count for organization_id, count in rows.tuples()}
+
+
+async def display_names(session: AsyncSession, user_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
+    """Name (or email) of each user the scope may see, in one query."""
+    if not user_ids:
+        return {}
+    rows = await session.execute(
+        select(User.id, User.display_name, User.email).where(User.id.in_(set(user_ids)))
+    )
+    return {uid: name or email for uid, name, email in rows.tuples()}

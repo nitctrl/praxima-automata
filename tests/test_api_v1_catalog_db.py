@@ -242,7 +242,7 @@ def test_agents_tools_numbers_and_roles(api):
     )
     assert created.status_code == 201
     agent = created.json()
-    assert len(agent["tools"]) == 7 and all(t["enabled"] for t in agent["tools"])
+    assert len(agent["tools"]) == len(CLINIC.tools) and all(t["enabled"] for t in agent["tools"])
     path = f"{base}/{agent['id']}"
 
     off = browser.put(f"{path}/tools/request_callback", json={"enabled": False}, headers=headers)
