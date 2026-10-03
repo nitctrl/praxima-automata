@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from praxima.modules import tenancy
 from praxima.modules.agents.infrastructure.models import Agent, AgentTool, PhoneNumber
 from praxima.shared.errors import NotFound
 
@@ -50,7 +51,11 @@ class IngressTarget:
 
 
 async def _agents(session: AsyncSession, agent_id: uuid.UUID | None) -> list[AgentView]:
-    """Agents with their tools and numbers: three queries however many agents there are."""
+    """Agents with their tools and numbers: four queries however many agents there are.
+
+    Tools the workspace's pack offers but an agent has no setting for yet (added by a pack
+    upgrade) are listed as off, so staff can opt in; they never switch on by themselves.
+    """
     statement = select(Agent).where(Agent.deleted_at.is_(None)).order_by(Agent.name, Agent.id)
     if agent_id is not None:
         statement = statement.where(Agent.id == agent_id)
@@ -73,6 +78,11 @@ async def _agents(session: AsyncSession, agent_id: uuid.UUID | None) -> list[Age
                     number.id, number.phone_number, number.provider, number.direction, number.status
                 )
             )
+        offered = (await tenancy.installed_pack(session, agents[0].workspace_id)).tools
+        for agent_tools in tools.values():
+            have = {t.key for t in agent_tools}
+            agent_tools.extend(ToolView(key, False) for key in offered if key not in have)
+            agent_tools.sort(key=lambda t: t.key)
     return [
         AgentView(
             a.id,

@@ -152,3 +152,33 @@ def test_suspended_organization_is_locked_but_kept(api, monkeypatch):
         ),
         422,
     )
+
+
+def test_tools_a_pack_upgrade_adds_appear_switched_off(api):
+    _, _, browser, headers, _, ws = setup(api)
+    base = f"/api/v1/workspaces/{ws}"
+    agent = browser.post(
+        f"{base}/agents", json={"name": "Desk", "slug": "desk", **MESSAGES}, headers=headers
+    ).json()
+    register("9.0.0", lambda payload: payload["tools"].append("transfer_to_human"))
+    row_version = browser.get(base).json()["row_version"]
+    upgraded = browser.post(
+        f"{base}/pack-upgrades",
+        json={"version": "9.0.0", "row_version": row_version},
+        headers=headers,
+    )
+    assert upgraded.status_code == 200, upgraded.text
+
+    def tools() -> dict[str, bool]:
+        found = browser.get(f"{base}/agents/{agent['id']}").json()["tools"]
+        return {t["key"]: t["enabled"] for t in found}
+
+    assert tools()["transfer_to_human"] is False  # offered now, but staff opt in
+    assert tools()["find_entities"] is True
+    switched = browser.put(
+        f"{base}/agents/{agent['id']}/tools/transfer_to_human",
+        json={"enabled": True},
+        headers=headers,
+    )
+    assert switched.status_code in (200, 204), switched.text
+    assert tools()["transfer_to_human"] is True
