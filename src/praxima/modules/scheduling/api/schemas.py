@@ -71,6 +71,7 @@ class BookingOut(BaseModel):
     confirmed_at: datetime | None
     created_at: datetime
     row_version: int
+    calendar_sync_status: str | None  # pending, synced, failed, removed (Google Calendar)
 
     @classmethod
     def of(cls, view: scheduling.BookingView) -> "BookingOut":
@@ -126,3 +127,17 @@ class RevealedBookingOut(BaseModel):
     caller_name: str | None
     phone: str | None
     staff_note: str | None
+
+
+class CalendarConnectionOut(BaseModel):
+    """`configured`: the server has Google OAuth set up; `status` none until connected."""
+
+    configured: bool
+    status: str  # none, active, error
+    account_email: str | None = None
+    error_code: str | None = None
+    last_synced_at: datetime | None = None
+
+
+class AuthorizeOut(BaseModel):
+    authorize_url: str

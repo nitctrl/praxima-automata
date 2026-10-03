@@ -37,6 +37,7 @@ PERMISSIONS = {
     "bookings:read": "staff",
     "bookings:write": "staff",
     "bookings:settings": "admin",
+    "calendars:manage": "manager",
 }
 
 

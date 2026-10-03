@@ -129,6 +129,7 @@ uv run src/agent.py console               # local microphone test
 uv run src/agent.py start                 # LiveKit worker
 uv run uvicorn main:app --reload --port 8080   # API on http://127.0.0.1:8080 (app in main.py)
 uv run python scripts/dashboard.py        # same API without reload, access log or proxy headers
+uv run python -m praxima.entrypoints.jobs # background worker: Google Calendar sync (outbox jobs)
 docker compose up -d qdrant               # optional semantic search (today)
 
 uv run alembic upgrade head               # apply new-schema revisions (DB_OWNER_DATABASE_URL)
@@ -484,6 +485,8 @@ POST-for-everything) migrate to this. Change the backend and
 | POST | `/workspaces/{wsId}/bookings/search`, `…/bookings/to-confirm` | ✅ the schedule / holds awaiting staff, with callers' names (a POST: viewing names is audited) |
 | POST / GET, PATCH | `/workspaces/{wsId}/bookings[/{id}]` | ✅ staff book an open slot (confirmed, `Idempotency-Key`; 409 if taken) / one booking without names / reschedule `{row_version, starts_at}` |
 | POST | `…/bookings/{id}/confirm`, `…/cancel`, `…/reveal` | ✅ confirm a hold / cancel with a reason / name, phone and note (audited) |
+| GET, POST / DELETE | `/workspaces/{wsId}/entities/{id}/calendar-connection` | ✅ Google Calendar status / start connecting (manager+; returns Google's consent URL) / disconnect (revokes) |
+| GET | `/integrations/google/callback` | ✅ OAuth return: no session cookie arrives (SameSite=Strict), so a signed, 10-minute state names the workspace, entry and user; their role is re-checked |
 | GET | `/workspaces/{wsId}/pack` | ✅ the installed pack's vocabulary: entry labels (singular/plural), document categories, live-update kinds, callback kind, starter agent wording |
 | POST | `/organizations/{orgId}/workspaces` | ✅ create a workspace and install its pack (admin+) |
 | GET | `/organizations/{orgId}/workspaces` | |

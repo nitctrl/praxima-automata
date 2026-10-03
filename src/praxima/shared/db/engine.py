@@ -99,6 +99,9 @@ def bypasses_rls(url: str) -> bool | None:
         engine.dispose()
 
 
+SessionFactory = async_sessionmaker[AsyncSession]
+
+
 def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     return async_sessionmaker(engine, expire_on_commit=False)
 

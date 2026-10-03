@@ -10,10 +10,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import Range
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from praxima.integrations.google.calendar import GoogleCalendar, GoogleError, sign_state
 from praxima.modules import audit, catalog, tenancy
 from praxima.modules.engagement import Vault
 from praxima.modules.iam import Actor, require
@@ -28,7 +29,13 @@ from praxima.modules.scheduling.application.selectors import (
     pending_confirmation,
     require_config,
 )
-from praxima.modules.scheduling.infrastructure.models import Booking, BookingSettings
+from praxima.modules.scheduling.infrastructure.models import (
+    Booking,
+    BookingSettings,
+    CalendarConnection,
+    ExternalBusy,
+)
+from praxima.shared.db import outbox
 from praxima.shared.db.base import utc_now
 from praxima.shared.db.errors import translate_db_errors
 from praxima.shared.errors import Conflict, FieldError, NotFound, ValidationFailed
@@ -359,3 +366,301 @@ async def booking_detail(
     """One booking without personal data (names come from the audited search or reveal)."""
     require(actor, "bookings:read")
     return await get_booking(session, vault, booking_id)
+
+
+# ------------------------------------------------------------------- calendars
+
+
+async def start_calendar_connection(
+    session: AsyncSession,
+    actor: Actor,
+    google: GoogleCalendar,
+    *,
+    workspace_id: uuid.UUID,
+    entity_id: uuid.UUID,
+    now: float,
+) -> str:
+    """The Google consent URL for one bookable entry (opened by the person who owns it)."""
+    require(actor, "calendars:manage")
+    await bookable_entity(session, workspace_id, entity_id)
+    state = sign_state(
+        google.config.client_secret,
+        {"ws": str(workspace_id), "entity": str(entity_id), "user": str(actor.user_id)},
+        now,
+    )
+    return google.authorize_url(state)
+
+
+async def _connection(session: AsyncSession, entity_id: uuid.UUID) -> CalendarConnection | None:
+    row: CalendarConnection | None = await session.scalar(
+        select(CalendarConnection).where(CalendarConnection.entity_id == entity_id)
+    )
+    return row
+
+
+async def complete_calendar_connection(
+    session: AsyncSession,
+    actor: Actor,
+    vault: Vault,
+    google: GoogleCalendar,
+    *,
+    workspace_id: uuid.UUID,
+    entity_id: uuid.UUID,
+    code: str,
+) -> None:
+    """Store the calendar's refresh token (encrypted) and queue its first sync."""
+    require(actor, "calendars:manage")
+    await bookable_entity(session, workspace_id, entity_id)
+    try:
+        tokens = await google.exchange_code(code)
+        email = await google.account_email(tokens.access_token)
+    except GoogleError as exc:
+        raise ValidationFailed(f"Google refused the connection ({exc.code}). Try again.") from None
+    if not tokens.refresh_token:
+        raise ValidationFailed(
+            "Google didn't grant offline access. Remove the app's access in "
+            "your Google account, then connect again."
+        )
+    row = await _connection(session, entity_id)
+    if row is None:
+        row = CalendarConnection(
+            workspace_id=workspace_id, entity_id=entity_id, created_by=actor.user_id
+        )
+        session.add(row)
+        await session.flush()
+    row.refresh_token_ciphertext = vault.seal(
+        workspace_id, row.id, "google_refresh_token", tokens.refresh_token
+    )
+    row.pii_key_version = vault.version
+    row.account_email = email
+    row.status, row.error_code, row.last_synced_at = "active", None, None
+    row.updated_by = actor.user_id
+    with translate_db_errors():
+        await session.flush()
+    await _audit(session, actor, workspace_id, "calendar.connect", row.id)
+    await outbox.enqueue(session, workspace_id, "calendar.sync_busy", {"entity_id": entity_id})
+    upcoming = await session.scalars(
+        select(Booking.id).where(
+            Booking.resource_entity_id == entity_id,
+            Booking.status == "confirmed",
+            func.upper(Booking.slot) > utc_now(),
+        )
+    )
+    for booking_id in upcoming:  # bookings made before connecting appear too
+        await outbox.enqueue(
+            session, workspace_id, "calendar.sync_booking", {"booking_id": booking_id}
+        )
+
+
+async def disconnect_calendar(
+    session: AsyncSession,
+    actor: Actor,
+    vault: Vault,
+    google: GoogleCalendar | None,
+    *,
+    workspace_id: uuid.UUID,
+    entity_id: uuid.UUID,
+) -> None:
+    """Revoke Google's access and forget the token and the busy time it read."""
+    require(actor, "calendars:manage")
+    row = await _connection(session, entity_id)
+    if row is None or row.status == "revoked":
+        raise NotFound("No calendar is connected.")
+    token = vault.open(
+        workspace_id,
+        row.id,
+        "google_refresh_token",
+        row.refresh_token_ciphertext,
+        row.pii_key_version,
+    )
+    if token and google is not None:
+        await google.revoke(token)
+    row.status, row.refresh_token_ciphertext, row.pii_key_version = "revoked", None, None
+    row.updated_by = actor.user_id
+    await session.execute(delete(ExternalBusy).where(ExternalBusy.entity_id == entity_id))
+    with translate_db_errors():
+        await session.flush()
+    await _audit(session, actor, workspace_id, "calendar.disconnect", row.id)
+
+
+class JobFailed(Exception):
+    def __init__(self, code: str, retryable: bool) -> None:
+        super().__init__(code)
+        self.code, self.retryable = code, retryable
+
+
+async def _access_token(
+    session: AsyncSession, vault: Vault, google: GoogleCalendar, row: CalendarConnection
+) -> str:
+    token = vault.open(
+        row.workspace_id,
+        row.id,
+        "google_refresh_token",
+        row.refresh_token_ciphertext,
+        row.pii_key_version,
+    )
+    if not token:
+        raise JobFailed("no_token", retryable=False)
+    try:
+        return await google.access_token(token)
+    except GoogleError as exc:
+        _calendar_error(row, exc)
+        raise
+
+
+def _calendar_error(row: CalendarConnection, exc: GoogleError) -> None:
+    if not exc.retryable:  # access revoked in Google, or refused: staff must reconnect
+        row.status, row.error_code = "error", exc.code
+
+
+async def _event(session: AsyncSession, vault: Vault, booking: Booking) -> dict[str, object]:
+    config = await require_config(session, booking.workspace_id)
+    timezone = (await tenancy.get_workspace(session, booking.workspace_id)).timezone
+    names = await catalog.entity_names(
+        session, [booking.subject_entity_id] if booking.subject_entity_id else []
+    )
+    ws, version = booking.workspace_id, booking.pii_key_version
+    name = vault.open(ws, booking.id, "subject_name", booking.subject_name_ciphertext, version)
+    phone = vault.open(ws, booking.id, "phone", booking.phone_ciphertext, version)
+    lines = [
+        f"Phone: {phone}" if phone else None,
+        f"For: {names[booking.subject_entity_id]}" if booking.subject_entity_id in names else None,
+        "Booked by the voice agent on a call" if booking.source == "call" else "Booked by staff",
+        f"Reference: {str(booking.id)[:8]}",
+    ]
+    return {
+        "summary": f"{config.label}: {name or 'Booking'}",
+        "description": "\n".join(line for line in lines if line),
+        "start": {"dateTime": booking.slot.lower.isoformat(), "timeZone": timezone},  # type: ignore[union-attr]  # bounded
+        "end": {"dateTime": booking.slot.upper.isoformat(), "timeZone": timezone},  # type: ignore[union-attr]
+        "extendedProperties": {"private": {"praxima_booking": str(booking.id)}},
+    }
+
+
+async def _mark_synced(
+    session: AsyncSession, booking_id: uuid.UUID, event_id: str | None, status: str | None
+) -> None:
+    """Calendar bookkeeping, not an edit: leaves row_version alone, so staff working on the
+    booking at the same moment don't get a "changed by someone else" conflict."""
+    await session.execute(
+        update(Booking)
+        .where(Booking.id == booking_id)
+        .values(calendar_event_id=event_id, calendar_sync_status=status)
+        .execution_options(synchronize_session=False)
+    )
+
+
+async def sync_booking_to_calendar(
+    session: AsyncSession, vault: Vault, google: GoogleCalendar, booking_id: uuid.UUID
+) -> None:
+    """Confirmed → event created or moved; otherwise its event is removed."""
+    booking = await session.get(Booking, booking_id)
+    if booking is None:
+        return
+    row = await _connection(session, booking.resource_entity_id)
+    if row is None or row.status != "active":
+        return
+    access = await _access_token(session, vault, google, row)
+    try:
+        if booking.status == "confirmed":
+            event = await _event(session, vault, booking)
+            event_id = await google.upsert_event(
+                access, row.calendar_id, booking.calendar_event_id, event
+            )
+            await _mark_synced(session, booking.id, event_id, "synced")
+        elif booking.calendar_event_id:
+            await google.delete_event(access, row.calendar_id, booking.calendar_event_id)
+            await _mark_synced(session, booking.id, None, "removed")
+    except GoogleError as exc:
+        _calendar_error(row, exc)
+        await _mark_synced(session, booking.id, booking.calendar_event_id, "failed")
+        raise
+
+
+async def sync_busy_from_calendar(
+    session: AsyncSession, vault: Vault, google: GoogleCalendar, entity_id: uuid.UUID
+) -> None:
+    """Replace the entry's cached busy time with Google's, for the booking window."""
+    row = await _connection(session, entity_id)
+    if row is None or row.status != "active":
+        return
+    settings = await booking_settings(session, row.workspace_id)
+    now = utc_now()
+    access = await _access_token(session, vault, google, row)
+    try:
+        busy = await google.busy(
+            access, row.calendar_id, now, now + timedelta(days=settings.horizon_days + 1)
+        )
+    except GoogleError as exc:
+        _calendar_error(row, exc)
+        raise
+    # Our own confirmed bookings come back as busy too; they're excluded from slots anyway.
+    await session.execute(delete(ExternalBusy).where(ExternalBusy.entity_id == entity_id))
+    for starts, ends in busy:
+        if ends > starts:
+            session.add(
+                ExternalBusy(
+                    workspace_id=row.workspace_id,
+                    entity_id=entity_id,
+                    busy=Range(starts, ends, bounds="[)"),
+                    synced_at=now,
+                )
+            )
+    row.last_synced_at, row.error_code = now, None
+    await session.flush()
+
+
+async def run_job(
+    session: AsyncSession,
+    vault: Vault,
+    google: GoogleCalendar | None,
+    *,
+    kind: str,
+    payload: dict[str, object],
+) -> None:
+    """One outbox job, inside its workspace's transaction. Raises JobFailed or GoogleError."""
+    if kind.startswith("calendar.") and google is None:
+        raise JobFailed("calendar_not_configured", retryable=False)
+    try:
+        if kind == "calendar.sync_booking":
+            assert google is not None
+            await sync_booking_to_calendar(
+                session, vault, google, uuid.UUID(str(payload["booking_id"]))
+            )
+        elif kind == "calendar.sync_busy":
+            assert google is not None
+            await sync_busy_from_calendar(
+                session, vault, google, uuid.UUID(str(payload["entity_id"]))
+            )
+        else:
+            raise JobFailed("unknown_kind", retryable=False)
+    except GoogleError as exc:
+        raise JobFailed(exc.code, exc.retryable) from None
+
+
+async def queue_busy_syncs(session: AsyncSession, older_than_minutes: int) -> int:
+    """Queue a busy-time sync for each calendar not synced lately (cross-tenant, definer)."""
+    queued = await session.scalar(
+        text("SELECT scheduling.enqueue_busy_syncs(:m)"), {"m": older_than_minutes}
+    )
+    return int(queued or 0)
+
+
+async def note_job_failure(
+    session: AsyncSession, *, kind: str, payload: dict[str, object], code: str, retryable: bool
+) -> None:
+    """Record what staff need to see after a failed job (its own transaction rolled back)."""
+    if not kind.startswith("calendar."):
+        return
+    entity_id: object = payload.get("entity_id")
+    if kind == "calendar.sync_booking":
+        booking = await session.get(Booking, uuid.UUID(str(payload["booking_id"])))
+        if booking is None:
+            return
+        entity_id = booking.resource_entity_id
+        await _mark_synced(session, booking.id, booking.calendar_event_id, "failed")
+    if not retryable and entity_id is not None:
+        row = await _connection(session, uuid.UUID(str(entity_id)))
+        if row is not None and row.status == "active":
+            row.status, row.error_code = "error", code[:60]
+            await session.flush()

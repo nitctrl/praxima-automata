@@ -35,6 +35,7 @@ from praxima.entrypoints.http.errors import problem_response
 from praxima.entrypoints.http.sessions import RateLimiter, SessionStore
 from praxima.entrypoints.http.setup import install
 from praxima.entrypoints.http.v1 import build_router
+from praxima.integrations.google.calendar import GoogleCalendar
 from praxima.integrations.llm.gemini import GroundedAnswerer
 from praxima.integrations.vectors.qdrant import VectorSearch
 from praxima.modules.engagement import Vault
@@ -198,6 +199,7 @@ def create_app(
     knowledge_index: KnowledgeIndex | None = None,
     vault: Vault | None = None,
     self_signup: bool = False,
+    google: GoogleCalendar | None = None,
 ) -> FastAPI:
     """The staff API: legacy /api routes plus the new /api/v1 REST API.
 
@@ -233,6 +235,8 @@ def create_app(
     app.state.knowledge_index = knowledge_index  # Qdrant; None → keyword search only
     app.state.vault = vault
     app.state.self_signup = self_signup
+    app.state.google = google  # Google Calendar OAuth client; None → connect answers 503
+    app.state.dashboard_origin = config.origins[0]  # where OAuth callbacks send people back
     app.include_router(build_router(), prefix="/api/v1")
 
     def rate(key: str, maximum: int) -> None:
@@ -682,8 +686,7 @@ def create_app(
             if len(sections) > 200 or sum(len(s.text) for s in sections) > 100000:
                 raise HTTPException(400, "Keep the reviewed text under the supported size.")
             update["sections"] = [
-                s.model_copy(update={"doctor_id": None}).model_dump(mode="json")
-                for s in sections
+                s.model_copy(update={"doctor_id": None}).model_dump(mode="json") for s in sections
             ]
         if "title" in values:
             title = values["title"]

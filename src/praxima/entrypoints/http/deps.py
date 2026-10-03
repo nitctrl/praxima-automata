@@ -7,6 +7,7 @@ so a failed commit is reported instead of a success.
 import secrets
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from praxima.entrypoints.http.identity import IdentityGateway
 from praxima.entrypoints.http.sessions import COOKIE_NAME, RateLimiter, SessionStore, WebSession
+from praxima.integrations.google.calendar import GoogleCalendar
 from praxima.modules import iam, tenancy
 from praxima.modules.engagement import Vault
 from praxima.modules.knowledge import KnowledgeIndex
@@ -216,3 +218,37 @@ def pii_vault(request: Request) -> Vault:
 
 
 PiiVault = Annotated[Vault, Depends(pii_vault)]
+
+
+def google_calendar(request: Request) -> GoogleCalendar:
+    """The Google Calendar client; 503 when GOOGLE_OAUTH_* isn't configured."""
+    value = getattr(request.app.state, "google", None)
+    if value is None:
+        raise Unavailable("Google Calendar isn't configured on this server.")
+    return value  # type: ignore[no-any-return]
+
+
+def optional_google_calendar(request: Request) -> GoogleCalendar | None:
+    return getattr(request.app.state, "google", None)
+
+
+Google = Annotated[GoogleCalendar, Depends(google_calendar)]
+MaybeGoogle = Annotated[GoogleCalendar | None, Depends(optional_google_calendar)]
+
+
+@asynccontextmanager
+async def access_for_user(
+    sessions: SessionMaker, user_id: uuid.UUID, workspace_id: uuid.UUID
+) -> AsyncIterator[Access]:
+    """Like WorkspaceAccess, for a request that carries no session cookie but a verified user
+    id (the signed OAuth state of a calendar connection)."""
+    async with scoped_transaction(sessions, Scope(user_id=user_id)) as session:
+        organization_id, status = await tenancy.organization_and_status_of(session, workspace_id)
+        yield await _authorize(
+            session,
+            user_id,
+            organization_id,
+            workspace_id,
+            "Workspace not found.",
+            organization_status=status,
+        )

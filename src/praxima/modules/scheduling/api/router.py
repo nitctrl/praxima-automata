@@ -1,27 +1,40 @@
 """Scheduling endpoints. No business logic or queries here."""
 
+import time
 import uuid
+import uuid as uuid_module
 from datetime import date, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Header, Query, Response, status
+from fastapi import APIRouter, Header, Query, Request, Response, status
+from fastapi.responses import RedirectResponse
 
-from praxima.entrypoints.http.deps import PiiVault, WorkspaceAccess
+from praxima.entrypoints.http.deps import (
+    Google,
+    MaybeGoogle,
+    PiiVault,
+    Sessions,
+    WorkspaceAccess,
+    access_for_user,
+)
 from praxima.entrypoints.http.responses import Page, PageInfo
+from praxima.integrations.google.calendar import read_state
 from praxima.modules import iam, scheduling
 from praxima.modules.scheduling.api.schemas import (
+    AuthorizeOut,
     BookingIn,
     BookingOut,
     BookingSearchIn,
     BookingSettingsOut,
     BookingSettingsPatch,
+    CalendarConnectionOut,
     CancelIn,
     RescheduleIn,
     RevealedBookingOut,
     RowVersionIn,
     SlotOut,
 )
-from praxima.shared.errors import FieldError, ValidationFailed
+from praxima.shared.errors import AppError, FieldError, ValidationFailed
 
 router = APIRouter(prefix="/workspaces/{workspace_id}", tags=["scheduling"])
 IdempotencyKey = Annotated[
@@ -199,3 +212,88 @@ async def reveal_booking(
     """Name, full phone and staff note (staff+). Every call is audited."""
     revealed = await scheduling.reveal(access.session, access.actor, vault, booking_id=booking_id)
     return RevealedBookingOut(**revealed.__dict__)
+
+
+# ------------------------------------------------------------------ Google Calendar
+
+
+@router.get("/entities/{entity_id}/calendar-connection")
+async def read_calendar_connection(
+    entity_id: uuid.UUID, access: WorkspaceAccess, google: MaybeGoogle
+) -> CalendarConnectionOut:
+    iam.require(access.actor, "catalog:read")
+    view = await scheduling.calendar_connection(access.session, entity_id)
+    if view is None:
+        return CalendarConnectionOut(configured=google is not None, status="none")
+    return CalendarConnectionOut(
+        configured=google is not None,
+        status=view.status,
+        account_email=view.account_email,
+        error_code=view.error_code,
+        last_synced_at=view.last_synced_at,
+    )
+
+
+@router.post("/entities/{entity_id}/calendar-connection")
+async def connect_calendar(
+    entity_id: uuid.UUID, access: WorkspaceAccess, google: Google
+) -> AuthorizeOut:
+    """Start connecting Google Calendar (manager+): open the returned URL to consent."""
+    url = await scheduling.start_calendar_connection(
+        access.session,
+        access.actor,
+        google,
+        workspace_id=_ws(access),
+        entity_id=entity_id,
+        now=time.time(),
+    )
+    return AuthorizeOut(authorize_url=url)
+
+
+@router.delete("/entities/{entity_id}/calendar-connection", status_code=status.HTTP_204_NO_CONTENT)
+async def disconnect_calendar(
+    entity_id: uuid.UUID, access: WorkspaceAccess, vault: PiiVault, google: MaybeGoogle
+) -> None:
+    await scheduling.disconnect_calendar(
+        access.session, access.actor, vault, google, workspace_id=_ws(access), entity_id=entity_id
+    )
+
+
+integrations_router = APIRouter(prefix="/integrations", tags=["scheduling"])
+
+
+@integrations_router.get("/google/callback", include_in_schema=False)
+async def google_callback(
+    request: Request,
+    sessions: Sessions,
+    vault: PiiVault,
+    google: Google,
+    state: str = "",
+    code: str = "",
+    error: str = "",
+) -> RedirectResponse:
+    """Google sends the browser back here. No session cookie arrives (SameSite=Strict), so the
+    signed state names who started it; their role is checked again before anything is stored."""
+    origin = request.app.state.dashboard_origin
+    values = read_state(google.config.client_secret, state, time.time())
+    if values is None:
+        return RedirectResponse(f"{origin}/schedule?calendar=expired", status_code=303)
+    back = f"{origin}/directory?entity={values['entity']}"
+    if error or not code:
+        return RedirectResponse(f"{back}&calendar=cancelled", status_code=303)
+    try:
+        async with access_for_user(
+            sessions, uuid_module.UUID(values["user"]), uuid_module.UUID(values["ws"])
+        ) as access:
+            await scheduling.complete_calendar_connection(
+                access.session,
+                access.actor,
+                vault,
+                google,
+                workspace_id=uuid_module.UUID(values["ws"]),
+                entity_id=uuid_module.UUID(values["entity"]),
+                code=code,
+            )
+    except AppError:
+        return RedirectResponse(f"{back}&calendar=failed", status_code=303)
+    return RedirectResponse(f"{back}&calendar=connected", status_code=303)

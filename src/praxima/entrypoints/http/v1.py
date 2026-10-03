@@ -8,6 +8,7 @@ from praxima.modules.engagement.api.router import router as engagement_router
 from praxima.modules.iam.api.router import router as iam_router
 from praxima.modules.knowledge.api.router import router as knowledge_router
 from praxima.modules.releases.api.router import router as releases_router
+from praxima.modules.scheduling.api.router import integrations_router
 from praxima.modules.scheduling.api.router import router as scheduling_router
 from praxima.modules.tenancy.api.router import router as tenancy_router
 
@@ -22,4 +23,5 @@ def build_router() -> APIRouter:
     router.include_router(engagement_router)
     router.include_router(releases_router)
     router.include_router(scheduling_router)
+    router.include_router(integrations_router)
     return router

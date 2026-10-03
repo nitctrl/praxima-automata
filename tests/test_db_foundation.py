@@ -249,14 +249,15 @@ def test_rls_bypass_check_against_real_postgres():
 
 
 def test_api_role_script_covers_every_table_schema():
-    """scripts/api_role.py grants each module schema that has tables (ops stays owner-only)."""
+    """scripts/api_role.py grants every module schema with tables (not Alembic's own)."""
     spec = importlib.util.spec_from_file_location("api_role", ROOT / "scripts/api_role.py")
     assert spec and spec.loader
     script = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(script)
     import_models()
-    with_tables = {table.schema for table in Base.metadata.tables.values()} - {"ops"}
+    with_tables = {table.schema for table in Base.metadata.tables.values()}
     assert with_tables <= set(script.SCHEMAS) <= set(MODULE_SCHEMAS)
+    assert script.EXCLUDED == ("ops.alembic_version",)
     assert all(name.split(".")[0] in script.SCHEMAS for name in script.READ_ONLY)
     migrations = "".join(p.read_text() for p in (ROOT / "db/migrations/versions").glob("*.py"))
     for function in script.FUNCTIONS:  # granted functions exist and are closed to PUBLIC

@@ -12,6 +12,7 @@ from fastapi import FastAPI
 
 from praxima.dev.activation import DEV_FILE, load_development
 from praxima.entrypoints.api import WebSettings, create_app
+from praxima.integrations.google.calendar import GoogleCalendar, GoogleConfig
 from praxima.integrations.llm.gemini import gemini_answerer
 from praxima.modules.engagement import Vault
 from praxima.modules.knowledge.infrastructure.qdrant_index import QdrantKnowledgeIndex
@@ -37,6 +38,9 @@ ENV_NAMES = (
     "CLINIC_PII_KEY_VERSION",
     "PRAXIMA_LOOKUP_KEY",
     "PRAXIMA_SELF_SIGNUP",
+    "GOOGLE_OAUTH_CLIENT_ID",
+    "GOOGLE_OAUTH_CLIENT_SECRET",
+    "GOOGLE_OAUTH_REDIRECT_URI",
 )
 
 
@@ -81,6 +85,12 @@ def build_app() -> FastAPI:
             )
     # Semantic knowledge search when Qdrant + fastembed are available; else keywords only.
     knowledge_index = QdrantKnowledgeIndex.from_environment()
+    # Google Calendar sync for bookable entries; optional (connect answers 503 without it).
+    try:
+        google_config = GoogleConfig.from_environment()
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
+    google = GoogleCalendar(google_config) if google_config else None
     # CRM personal data needs encryption and lookup keys; without them those endpoints 503.
     try:
         vault: Vault | None = Vault.from_environment()
@@ -95,6 +105,7 @@ def build_app() -> FastAPI:
         vault=vault,
         # Anyone may register and create their own organization (off unless "true").
         self_signup=os.environ.get("PRAXIMA_SELF_SIGNUP", "").strip().lower() == "true",
+        google=google,
     )
 
 

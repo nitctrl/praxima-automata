@@ -11,7 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praxima.modules import catalog, iam, tenancy
 from praxima.modules.engagement import Vault
-from praxima.modules.scheduling.infrastructure.models import Booking, BookingSettings
+from praxima.modules.scheduling.infrastructure.models import (
+    Booking,
+    BookingSettings,
+    CalendarConnection,
+    ExternalBusy,
+)
 from praxima.shared.db.base import utc_now
 from praxima.shared.errors import NotFound, ValidationFailed
 from praxima.shared.kernel.slots import DayException, WeeklyHours, open_slots
@@ -132,7 +137,19 @@ async def open_slots_for(
     )
     if ignore_booking is not None:  # rescheduling: its own slot doesn't block the move
         statement = statement.where(Booking.id != ignore_booking)
-    taken = await session.execute(statement)
+    taken = list((await session.execute(statement)).tuples())
+    # Busy time read from the entry's connected calendar blocks slots too.
+    taken += list(
+        (
+            await session.execute(
+                select(func.lower(ExternalBusy.busy), func.upper(ExternalBusy.busy)).where(
+                    ExternalBusy.entity_id == entity_id,
+                    func.upper(ExternalBusy.busy) > window_start,
+                    func.lower(ExternalBusy.busy) < window_end,
+                )
+            )
+        ).tuples()
+    )
     return open_slots(
         rules=[
             WeeklyHours(r.rrule, r.start_time, r.end_time)
@@ -146,7 +163,7 @@ async def open_slots_for(
         ],
         timezone=timezone,
         slot_minutes=settings.slot_minutes,
-        busy=list(taken.tuples()),
+        busy=taken,
         now=now,
         first_day=first_day,
         days=days,
@@ -174,6 +191,7 @@ class BookingView:
     confirmed_at: datetime | None
     created_at: datetime
     row_version: int
+    calendar_sync_status: str | None
 
 
 async def _views(
@@ -226,6 +244,7 @@ async def _views(
                 b.confirmed_at,
                 b.created_at,
                 b.row_version,
+                b.calendar_sync_status,
             )
         )
     return views
@@ -272,3 +291,27 @@ async def get_booking(session: AsyncSession, vault: Vault, booking_id: uuid.UUID
         raise NotFound("Booking not found.")
     [view] = await _views(session, vault, [booking], utc_now(), with_names=False)
     return view
+
+
+@dataclass(frozen=True)
+class CalendarConnectionView:
+    entity_id: uuid.UUID
+    status: str  # active, error, revoked
+    account_email: str | None
+    error_code: str | None
+    last_synced_at: datetime | None
+
+
+async def calendar_connection(
+    session: AsyncSession, entity_id: uuid.UUID
+) -> CalendarConnectionView | None:
+    row = await session.scalar(
+        select(CalendarConnection).where(
+            CalendarConnection.entity_id == entity_id, CalendarConnection.status != "revoked"
+        )
+    )
+    if row is None:
+        return None
+    return CalendarConnectionView(
+        row.entity_id, row.status, row.account_email, row.error_code, row.last_synced_at
+    )

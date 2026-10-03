@@ -510,6 +510,16 @@ for RLS policies, triggers and partitions, and `alembic check` must show no drif
   booking). "Require staff confirmation" (`booking_settings`, default on) decides whether a
   call's booking is held for staff or confirmed at once. The schedule with names is a POST
   (`bookings/search`), audited once per view; `…/reveal` shows the phone (audited).
+- **Google Calendar** (migration 0014): a manager connects an entry's calendar from the
+  Directory (OAuth web flow; the refresh token is stored encrypted). Booking changes queue
+  `calendar.sync_booking` jobs in `ops.outbox` by trigger; `entrypoints/jobs.py` claims due jobs
+  across workspaces (`ops.claim_outbox`, the only cross-tenant step, allowed by `ops.is_worker()`:
+  a flag plus being the table owner) and runs each in its workspace's scope: confirmed → event
+  created or moved, otherwise removed. Every 5 minutes it reads free/busy into
+  `scheduling.external_busy`, which blocks slots for staff and for the voice agent
+  (`runtime_slot_context`). Revoked access marks the connection "error" so staff reconnect.
+  Event title "<label>: <name>", description holds the phone: shared with the entry's own
+  calendar only.
 - **Booking on calls** (`runtime/release/knowledge.py`, migration 0013): `find_open_slots`
   computes open slots from the pinned release's published hours (`lookup.entity_hours`) minus
   busy ranges from `scheduling.runtime_slot_context`; `book_slot` checks the time is one of

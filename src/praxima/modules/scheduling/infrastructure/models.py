@@ -8,12 +8,12 @@ are kept in clear so staff can tell bookings apart without revealing the number.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, LargeBinary, Text
+from sqlalchemy import ForeignKey, LargeBinary, Text, func
 from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import TSTZRANGE, Range
 from sqlalchemy.orm import Mapped, mapped_column
 
-from praxima.shared.db.base import AuthoringMixin, Base, IdMixin, TenantMixin
+from praxima.shared.db.base import AuthoringMixin, Base, IdMixin, TenantMixin, utc_now
 
 SCHEMA = "scheduling"
 WORKSPACES = "tenancy.workspaces.id"
@@ -58,3 +58,36 @@ class Booking(IdMixin, TenantMixin, AuthoringMixin, Base):
     confirmed_by: Mapped[uuid.UUID | None]
     cancelled_at: Mapped[datetime | None]
     cancelled_by: Mapped[uuid.UUID | None]
+    calendar_event_id: Mapped[str | None] = mapped_column(Text)
+    calendar_sync_status: Mapped[str | None] = mapped_column(Text)
+
+
+class CalendarConnection(IdMixin, TenantMixin, AuthoringMixin, Base):
+    """One entry's Google Calendar (migration 0014); the refresh token is ciphertext only."""
+
+    __tablename__ = "calendar_connections"
+    __table_args__ = {"schema": SCHEMA}
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(WORKSPACES))
+    entity_id: Mapped[uuid.UUID]
+    provider: Mapped[str] = mapped_column(Text, default="google", server_default="google")
+    account_email: Mapped[str | None] = mapped_column(Text)
+    calendar_id: Mapped[str] = mapped_column(Text, default="primary", server_default="primary")
+    refresh_token_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary)
+    pii_key_version: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, default="active", server_default="active")
+    error_code: Mapped[str | None] = mapped_column(Text)
+    last_synced_at: Mapped[datetime | None]
+
+
+class ExternalBusy(TenantMixin, Base):
+    """Busy time read from an entry's calendar; replaced wholesale on each sync."""
+
+    __tablename__ = "external_busy"
+    __table_args__ = {"schema": SCHEMA}
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(WORKSPACES))
+    entity_id: Mapped[uuid.UUID]
+    busy: Mapped[Range[datetime]] = mapped_column(TSTZRANGE)
+    synced_at: Mapped[datetime] = mapped_column(default=utc_now, server_default=func.now())

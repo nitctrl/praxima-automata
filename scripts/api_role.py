@@ -38,7 +38,10 @@ SCHEMAS = (
     "engagement",
     "scheduling",
     "audit",
+    "ops",
 )
+# Owner-only tables in those schemas: never granted to the API login.
+EXCLUDED = ("ops.alembic_version",)
 # Platform tables: the API reads them; only migrations and scripts change them.
 READ_ONLY = ("tenancy.pack_versions", "iam.platform_admins")
 # Platform admin writes (migration 0010): each checks for a platform admin in the database.
@@ -48,6 +51,9 @@ FUNCTIONS = (
     "iam.admin_list_platform_admins()",
     "iam.admin_grant_platform_admin(uuid)",
     "iam.admin_revoke_platform_admin(uuid)",
+    # The background worker (same login in development): claim due jobs, queue busy syncs.
+    "ops.claim_outbox(integer)",
+    "scheduling.enqueue_busy_syncs(integer)",
 )
 ROLE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 TABLES = text(
@@ -78,7 +84,11 @@ async def run(command: str, role: str) -> int:
                 text("SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = :role"), {"role": role}
             ):
                 sys.exit(f"✗ No role {role!r}. Create it first (see --help).")
-            tables = (await connection.execute(TABLES, {"schemas": list(SCHEMAS)})).scalars().all()
+            tables = [
+                t
+                for t in (await connection.execute(TABLES, {"schemas": list(SCHEMAS)})).scalars()
+                if t not in EXCLUDED
+            ]
             functions = [
                 f
                 for f in FUNCTIONS
