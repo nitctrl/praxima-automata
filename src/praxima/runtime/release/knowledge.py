@@ -490,8 +490,12 @@ class ReleaseKnowledge:
         return self._track("book_slot", {"status": status or "unavailable", **fallback})
 
 
-async def load_release_knowledge(called_number: str) -> ReleaseKnowledge:
-    """Pin this call to the live release of the agent the called number is routed to."""
+async def load_release_knowledge(
+    called_number: str, trunk_id: str | None = None
+) -> ReleaseKnowledge:
+    """Pin this call to the live release of the agent the called number is routed to.
+
+    SIP calls also pass their trunk, checked against the number's trusted trunk."""
     if not called_number:
         return ReleaseKnowledge(NoRelease("no_called_number"))
-    return ReleaseKnowledge(await load_release(called_number))
+    return ReleaseKnowledge(await load_release(called_number, trunk_id))

@@ -321,3 +321,32 @@ def test_calls_and_requests_are_recorded_for_staff(api, monkeypatch):
     assert [h["actor_type"] for h in detail["history"]] == ["runtime"]
     revealed = browser.post(f"{base}/work-items/{item['id']}/reveal", headers=headers).json()
     assert (revealed["subject_name"], revealed["callback_number"]) == ("Ravi Kumar", caller)
+
+
+def test_sip_calls_must_arrive_on_the_numbers_trusted_trunk(api, monkeypatch):
+    """Migration 0015: a number pinned to a trunk is refused on any other trunk."""
+    from praxima.runtime.release.loader import LoadedRelease, NoRelease, load_release
+
+    monkeypatch.setenv("PRAXIMA_RUNTIME_DATABASE_URL", URL)
+    app, engine, browser, headers, _, ws = setup(api)
+    base = f"/api/v1/workspaces/{ws}"
+    agent = browser.post(
+        f"{base}/agents", json={"name": "Desk", "slug": "desk", **MESSAGES}, headers=headers
+    ).json()
+    content(browser, headers, base)
+    pinned, open_number = "+912212340001", "+912212340002"
+    for number, trunk in ((pinned, "ST_trusted"), (open_number, None)):
+        routed = browser.post(
+            f"{base}/agents/{agent['id']}/phone-numbers",
+            json={"phone_number": number, "provider": "plivo", "trusted_trunk_id": trunk},
+            headers=headers,
+        )
+        assert routed.status_code == 201, routed.text
+    path = f"{base}/agents/{agent['id']}/releases"
+    digest = browser.post(f"{path}/preview", headers=headers).json()["digest"]
+    browser.post(path, json={"digest": digest}, headers=headers)
+
+    assert isinstance(asyncio.run(load_release(pinned, "ST_trusted")), LoadedRelease)
+    assert asyncio.run(load_release(pinned, "ST_other")) == NoRelease("untrusted_trunk")
+    assert isinstance(asyncio.run(load_release(open_number, "ST_any")), LoadedRelease)
+    assert isinstance(asyncio.run(load_release(pinned)), LoadedRelease)  # console: no trunk

@@ -191,7 +191,12 @@ inbound call → resolve phone number → agent → workspace (trusted ingress)
 ```
 
 The hot path does **one indexed read** of the published release per call and keeps it in
-memory. Retrieval is hybrid lexical plus semantic (RRF) over reviewed knowledge chunks and
+memory. Around the model the call is deterministic (`runtime/call_flow.py`, wired in
+`entrypoints/voice_worker.py`): every caller turn is safety-classified first (emergency →
+the published emergency message, spoken without the model; medical / prompt injection → a
+guard instruction); knowledge loads in parallel with audio (generic greeting after 1.5 s);
+no release → a fixed message and hang-up; silence and maximum duration end the call politely;
+SIP calls must arrive on the number's trusted trunk (`releases.live_release_for_call`). Retrieval is hybrid lexical plus semantic (RRF) over reviewed knowledge chunks and
 active announcements.
 
 ### 4.4 Layers inside every module

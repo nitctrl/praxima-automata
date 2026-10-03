@@ -33,9 +33,9 @@ class LoadedRelease:
 
 @dataclass(frozen=True)
 class NoRelease:
-    """Why nothing was loaded: invalid_number, unknown_number, agent_disabled, no_live_release,
-    runtime_database_not_configured, database_unavailable, unsupported_schema_version,
-    invalid_snapshot."""
+    """Why nothing was loaded: invalid_number, unknown_number, untrusted_trunk, agent_disabled,
+    organization_inactive, no_live_release, runtime_database_not_configured,
+    database_unavailable, unsupported_schema_version, invalid_snapshot."""
 
     reason: str
 
@@ -79,7 +79,11 @@ def interpret(result: Any) -> LoadedRelease | NoRelease:
         return NoRelease("invalid_snapshot")
 
 
-async def load_release(called_number: str) -> LoadedRelease | NoRelease:
+async def load_release(
+    called_number: str, trunk_id: str | None = None
+) -> LoadedRelease | NoRelease:
+    """SIP calls pass the trunk LiveKit reported (checked against the number's trusted
+    trunk, migration 0015); console tests pass None."""
     url = runtime_database_url()
     if url is None:
         return NoRelease("runtime_database_not_configured")
@@ -89,9 +93,15 @@ async def load_release(called_number: str) -> LoadedRelease | NoRelease:
             url, connect_timeout=CONNECT_TIMEOUT_SECONDS
         ) as conn:
             await conn.execute("SET TRANSACTION READ ONLY")
-            row = await (
-                await conn.execute("SELECT releases.live_release_for_number(%s)", (called_number,))
-            ).fetchone()
+            if trunk_id is None:
+                lookup = conn.execute(
+                    "SELECT releases.live_release_for_number(%s)", (called_number,)
+                )
+            else:
+                lookup = conn.execute(
+                    "SELECT releases.live_release_for_call(%s,%s)", (called_number, trunk_id)
+                )
+            row = await (await lookup).fetchone()
             await conn.rollback()  # read-only: nothing to keep, settings end with the transaction
             return row[0] if row else None
 

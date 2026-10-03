@@ -15,7 +15,8 @@ from praxima.shared.security.privacy import PiiCipher
     "text,route",
     [
         ("When is Dr Sharma available?", "administrative"),
-        ("मेरे सीने में दर्द है", "medical"),
+        ("मेरे सीने में दर्द है", "emergency"),  # chest pain, as in English
+        ("mere seene me dard hai", "emergency"),
         ("What dose should I take?", "medical"),
         ("I cannot breathe", "emergency"),
         ("बेहोश है", "emergency"),

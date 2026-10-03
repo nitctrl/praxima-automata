@@ -30,6 +30,7 @@ from praxima.shared.db.settings import ConfigurationError
 ROOT = Path(__file__).resolve().parents[1]
 FUNCTIONS = (
     "releases.live_release_for_number(text)",
+    "releases.live_release_for_call(text, text)",
     "engagement.runtime_start_conversation(uuid, uuid, uuid, text, text, text, boolean)",
     "engagement.runtime_record_event(uuid, uuid, text, text, jsonb)",
     "engagement.runtime_finish_conversation(uuid, uuid, text, text, text, text)",

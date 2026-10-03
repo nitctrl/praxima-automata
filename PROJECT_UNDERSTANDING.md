@@ -520,6 +520,18 @@ for RLS policies, triggers and partitions, and `alembic check` must show no drif
   (`runtime_slot_context`). Revoked access marks the connection "error" so staff reconnect.
   Event title "<label>: <name>", description holds the phone: shared with the entry's own
   calendar only.
+- **Call handling around the model** (`runtime/call_flow.py`, `entrypoints/voice_worker.py`):
+  each caller turn is classified by `runtime/policy/safety.classify` before the model sees
+  it: emergencies get the release's emergency message without the model (StopResponse);
+  medical and prompt-injection turns get a guard system message; the route is recorded
+  content-free as a `safety_router` tool event. Knowledge loads while audio starts; a generic
+  bilingual greeting covers a load over 1.5 s. With no release the caller hears a fixed
+  message ("not available on this number" or "technical problem") and the room is deleted.
+  "Are you still there?" after 20 s of silence, goodbye after 30 s more;
+  `PRAXIMA_MAX_CALL_SECONDS` (default 900) ends long calls; non-recoverable model errors ask
+  the caller to repeat. Speech-to-text detects each utterance's language and the voice
+  follows confident switches. SIP calls are looked up with `releases.live_release_for_call`
+  (migration 0015): a number with a `trusted_trunk_id` is refused on any other trunk.
 - **Booking on calls** (`runtime/release/knowledge.py`, migration 0013): `find_open_slots`
   computes open slots from the pinned release's published hours (`lookup.entity_hours`) minus
   busy ranges from `scheduling.runtime_slot_context`; `book_slot` checks the time is one of

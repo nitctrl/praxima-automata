@@ -11,21 +11,25 @@ def test_original_voice_hooks_are_not_overridden():
     from praxima.entrypoints.voice_worker import VoiceAgent
 
     assert VoiceAgent.tts_node is Agent.tts_node
-    assert VoiceAgent.on_user_turn_completed is Agent.on_user_turn_completed
     assert VoiceAgent.llm_node is Agent.llm_node
+    # The one deliberate override: deterministic safety routing before the model.
+    assert VoiceAgent.on_user_turn_completed is not Agent.on_user_turn_completed
 
 
-def test_only_unified_rag_tool_is_attached(monkeypatch):
+def test_agent_starts_without_tools_while_knowledge_loads(monkeypatch):
     from praxima.entrypoints import voice_worker as agent
 
     captured = {}
     monkeypatch.setattr(agent.Agent, "__init__", lambda self, **kw: captured.update(kw))
     for provider, name in [(agent.sarvam, "STT"), (agent.sarvam, "TTS"), (agent.google, "LLM")]:
         monkeypatch.setattr(provider, name, Mock())
+    monkeypatch.delenv("SARVAM_STT_LANGUAGE", raising=False)
     agent.VoiceAgent(telephony=True)
-    assert len(captured["tools"]) == 1
+    # Knowledge loads in parallel; its tools and prompt are attached once it arrives.
+    assert captured["tools"] == []
     assert not hasattr(agent, "lookup_info")
-    assert "Clinic knowledge is unavailable" in captured["instructions"]
+    assert captured["instructions"] == agent.flow.LOADING_INSTRUCTIONS
+    assert agent.sarvam.STT.call_args.kwargs["language"] == "unknown"  # per-utterance detection
     assert captured["min_endpointing_delay"] == 0.45
     assert captured["max_endpointing_delay"] == 1.2
     assert agent.google.LLM.call_args.kwargs["temperature"] == 0
