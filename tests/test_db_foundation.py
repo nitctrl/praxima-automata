@@ -121,7 +121,7 @@ class _FakeSession:
         self.calls.append((str(statement), params))
 
 
-SET = "SELECT set_config(:name, :value, true)"
+SET = "SELECT set_config(:n0, :v0, true), set_config(:n1, :v1, true)"
 
 
 def test_tenant_transaction_scopes_workspace_and_organization():
@@ -133,9 +133,17 @@ def test_tenant_transaction_scopes_workspace_and_organization():
             pass
 
     asyncio.run(run())
+    # One statement (one round trip) sets the whole scope.
     assert session.calls == [
-        (SET, {"name": "app.workspace_id", "value": str(workspace)}),
-        (SET, {"name": "app.organization_id", "value": str(organization)}),
+        (
+            SET,
+            {
+                "n0": "app.workspace_id",
+                "v0": str(workspace),
+                "n1": "app.organization_id",
+                "v1": str(organization),
+            },
+        )
     ]
     assert session.committed
 

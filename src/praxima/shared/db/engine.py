@@ -18,7 +18,6 @@ from sqlalchemy.pool import NullPool
 
 from praxima.shared.db.settings import ConfigurationError
 
-_SET = text("SELECT set_config(:name, :value, true)")
 _POWERFUL = text(
     "SELECT rolsuper OR rolbypassrls FROM pg_catalog.pg_roles WHERE rolname = current_user"
 )
@@ -105,9 +104,18 @@ def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
 
 
 async def apply_scope(session: AsyncSession, scope: Scope) -> None:
-    """Set (or narrow) the RLS scope of the session's current transaction."""
-    for name, value in scope.settings():
-        await session.execute(_SET, {"name": name, "value": value})
+    """Set (or narrow) the RLS scope of the session's current transaction.
+
+    All settings go in one statement: each round trip to a remote database costs latency.
+    """
+    settings = scope.settings()
+    if not settings:
+        return
+    calls = ", ".join(f"set_config(:n{i}, :v{i}, true)" for i in range(len(settings)))
+    params = {}
+    for i, (name, value) in enumerate(settings):
+        params[f"n{i}"], params[f"v{i}"] = name, value
+    await session.execute(text(f"SELECT {calls}"), params)
 
 
 @asynccontextmanager

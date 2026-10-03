@@ -90,6 +90,22 @@ async def organization_of(session: AsyncSession, workspace_id: uuid.UUID) -> uui
     return organization_id
 
 
+async def organization_and_status_of(
+    session: AsyncSession, workspace_id: uuid.UUID
+) -> tuple[uuid.UUID, str]:
+    """The workspace's organization and that organization's status, in one query."""
+    row = (
+        await session.execute(
+            select(Workspace.organization_id, Organization.status)
+            .outerjoin(Organization, Organization.id == Workspace.organization_id)
+            .where(Workspace.id == workspace_id, Workspace.deleted_at.is_(None))
+        )
+    ).one_or_none()
+    if row is None:
+        raise NotFound("Workspace not found.")
+    return row[0], row[1] or "active"
+
+
 async def organization_status(session: AsyncSession, organization_id: uuid.UUID) -> str | None:
     """active, suspended or closed; None when the scope can't see the organization."""
     status: str | None = await session.scalar(

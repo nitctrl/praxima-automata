@@ -118,13 +118,16 @@ async def _authorize(
     organization_id: uuid.UUID,
     workspace_id: uuid.UUID | None,
     missing: str,
+    organization_status: str | None = None,
 ) -> Access:
     role = await iam.role_in(session, user_id, organization_id, workspace_id)
     admin = await iam.is_platform_admin(session, user_id)
     if role is None and not admin:
         raise NotFound(missing)  # never reveal that another tenant's resource exists
+    if organization_status is None:
+        organization_status = await tenancy.organization_status(session, organization_id)
     # Platform admins keep access to a suspended organization, to support it.
-    if not admin and await tenancy.organization_status(session, organization_id) == "suspended":
+    if not admin and organization_status == "suspended":
         raise PermissionDenied(
             "This organization is suspended. Contact the platform team to reactivate it."
         )
@@ -139,9 +142,14 @@ async def workspace_access(
 ) -> AsyncIterator[Access]:
     """Resolve the caller's role in the path's workspace, then scope RLS to it."""
     async with scoped_transaction(sessions, Scope(user_id=user.user_id)) as session:
-        organization_id = await tenancy.organization_of(session, workspace_id)
+        organization_id, status = await tenancy.organization_and_status_of(session, workspace_id)
         yield await _authorize(
-            session, user.user_id, organization_id, workspace_id, "Workspace not found."
+            session,
+            user.user_id,
+            organization_id,
+            workspace_id,
+            "Workspace not found.",
+            organization_status=status,
         )
 
 
