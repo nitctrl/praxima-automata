@@ -510,6 +510,14 @@ for RLS policies, triggers and partitions, and `alembic check` must show no drif
   booking). "Require staff confirmation" (`booking_settings`, default on) decides whether a
   call's booking is held for staff or confirmed at once. The schedule with names is a POST
   (`bookings/search`), audited once per view; `…/reveal` shows the phone (audited).
+- **Booking on calls** (`runtime/release/knowledge.py`, migration 0013): `find_open_slots`
+  computes open slots from the pinned release's published hours (`lookup.entity_hours`) minus
+  busy ranges from `scheduling.runtime_slot_context`; `book_slot` checks the time is one of
+  them, encrypts the name and phone, and calls `scheduling.runtime_book_slot` (held or
+  confirmed per the switch, `taken` on a race, idempotent per call and slot). The prompts
+  describe both tools only when the release enables them, and the "never claim confirmed"
+  rule then defers to what `book_slot` returned. Grant the voice login with
+  `scripts/voice_runtime.py grant <role>` after migrating.
 - **Suspending an organization** (`PATCH /platform/organizations/{id}`): its members get 403
   on every workspace and organization endpoint (`deps._authorize`), `WorkspaceOut` carries
   `organization_status`, and `releases.live_release_for_number` answers

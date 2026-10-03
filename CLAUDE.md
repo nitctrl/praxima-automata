@@ -134,7 +134,7 @@ docker compose up -d qdrant               # optional semantic search (today)
 uv run alembic upgrade head               # apply new-schema revisions (DB_OWNER_DATABASE_URL)
 uv run python scripts/packs.py register    # register shipped domain packs (needed before creating workspaces)
 uv run python scripts/check_database.py   # diagnose the /api/v1 database connection (never prints secrets)
-uv run python scripts/voice_runtime.py {grant|check} <role>   # voice worker login: release lookup + call records only
+uv run python scripts/voice_runtime.py {grant|check} <role>   # voice worker login: release lookup, call records, slot booking only
 uv run python scripts/api_role.py {grant|check} <role>        # API login: module tables under RLS (never a BYPASSRLS owner)
 uv run python scripts/platform_admin.py {grant|revoke|list} [email]   # first platform admin; then use the dashboard's Platform area
 uv run alembic upgrade head --sql         # print the SQL only (review / squawk), no database
@@ -300,7 +300,8 @@ packs/<pack_id>/
 - Generic voice tools work for every pack: `find_entities(type, filters)`,
   `get_entity(key)`, `get_availability(entity)`, `search_knowledge(query)`,
   `get_announcements()`, `create_work_item(kind, payload)`, `request_callback()`,
-  `transfer_to_human()`. Packs rename and describe them for the LLM but never change their
+  `transfer_to_human()`, and for packs with a `booking` block `find_open_slots(entity, date)`
+  and `book_slot(entity, date, time, …)` (migration 0013's runtime functions). Packs rename and describe them for the LLM but never change their
   safety semantics.
 - Adding a new industry means **adding a pack and tests, with no core changes and no
   migrations**. If a core change seems necessary, write an ADR first.

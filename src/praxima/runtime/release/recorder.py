@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import uuid
+from datetime import datetime
 from typing import Any
 
 import psycopg
@@ -170,6 +171,63 @@ class CallRecorder:
             self.requests.append(kind)
             self.event("request_created", {"kind": kind})
         return uuid.UUID(str(result["id"])), created
+
+    async def slot_context(
+        self, entity_id: str, starts: datetime, ends: datetime
+    ) -> dict[str, Any]:
+        """Booking rules and busy ranges of one entry (scheduling.runtime_slot_context)."""
+        result = await self._call(
+            "SELECT scheduling.runtime_slot_context(%s,%s,%s,%s)",
+            (self.workspace_id, entity_id, starts, ends),
+        )
+        return result if isinstance(result, dict) else {"enabled": False, "reason": "unknown"}
+
+    async def book_slot(
+        self,
+        *,
+        entity_id: str,
+        subject_id: str | None,
+        starts_at: datetime,
+        name: str,
+        phone: str | None,
+    ) -> dict[str, Any]:
+        """Book one slot for the caller (held or confirmed per the workspace's setting).
+
+        Idempotent per call, entry and start time: a retried tool call never books twice.
+        """
+        if self.conversation_id is None:
+            raise RecordingUnavailable("no_conversation")
+        booking_id = new_id()
+        try:
+            cipher = PiiCipher.from_environment()
+        except ValueError:
+            raise RecordingUnavailable("pii_keys_missing") from None
+        subject = cipher.encrypt(name, self.workspace_id, booking_id, "subject_name")
+        number = cipher.encrypt(phone, self.workspace_id, booking_id, "phone") if phone else None
+        result = await self._call(
+            "SELECT scheduling.runtime_book_slot(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (
+                self.workspace_id,
+                self.conversation_id,
+                self.release.agent_id,
+                booking_id,
+                entity_id,
+                subject_id,
+                starts_at,
+                f"voice:{self.conversation_id}:{entity_id}:{starts_at.isoformat()}",
+                subject,
+                number,
+                phone[-4:] if phone else None,
+                cipher.current,
+            ),
+        )
+        if not isinstance(result, dict):
+            raise RecordingUnavailable("no_result")
+        if result.get("created") and result.get("status") in ("held", "confirmed"):
+            self.requests.append("booking")
+            # An allowed event type (0009): a booking is the request this call produced.
+            self.event("request_created", {"kind": "booking", "status": result["status"]})
+        return result
 
     async def finish(self, reason: str = "") -> None:
         """At hang-up: close the conversation with its outcome (content-free)."""

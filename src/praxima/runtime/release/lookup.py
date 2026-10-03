@@ -15,6 +15,7 @@ from dateutil.rrule import rrulestr
 
 from praxima.modules.knowledge.domain.documents import tokens
 from praxima.modules.releases.domain.agent_snapshot import AgentSnapshot, EntityItem
+from praxima.shared.kernel.slots import DayException, WeeklyHours
 
 MAX_TEXT = 700
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
@@ -437,3 +438,36 @@ def prepare_request(
             "fix": {"callback_number": "Confirm the number with its country code, e.g. +9198…"},
         }
     return {"status": "ok", "payload": payload, "entity_id": entity_id}
+
+
+# ------------------------------------------------------------------ slot booking
+
+
+def entity_hours(
+    snapshot: AgentSnapshot, entity_id: str
+) -> tuple[list[WeeklyHours], list[DayException]]:
+    """The entry's published weekly hours and dated exceptions, for open-slot maths."""
+    rules = [
+        WeeklyHours(r.rrule, time.fromisoformat(r.start_time), time.fromisoformat(r.end_time))
+        for r in snapshot.availability.rules
+        if r.entity_id == entity_id and r.start_time and r.end_time
+    ]
+    exceptions = [
+        DayException(
+            date.fromisoformat(x.date),
+            x.is_available,
+            _clock(x.start_time),
+            _clock(x.end_time),
+        )
+        for x in snapshot.availability.exceptions
+        if x.entity_id == entity_id
+    ]
+    return rules, exceptions
+
+
+def describe_slots(starts: list[datetime], limit: int = 12) -> list[dict[str, str]]:
+    """Slot starts as the caller hears them: date, weekday and 24-hour time."""
+    return [
+        {"date": s.date().isoformat(), "day": WEEKDAYS[s.weekday()], "time": s.strftime("%H:%M")}
+        for s in starts[:limit]
+    ]

@@ -419,3 +419,24 @@ def test_sections_tagged_with_a_named_entry_rank_higher():
         if p["source"] != "directory"
     ]
     assert documents[0]["source"] == "Doctor profiles"
+
+
+def test_prompt_and_tools_offer_booking_only_when_enabled():
+    from praxima.runtime.release.knowledge import ReleaseKnowledge
+
+    assert "book_slot" not in render_release_prompt(SNAPSHOT, NOW)
+    for pack in ("clinic", "real_estate", "hotel"):
+        booking = AgentSnapshot.model_validate(
+            RAW
+            | {
+                "tools": [{"key": "find_open_slots"}, {"key": "book_slot"}],
+                "pack": {"key": pack, "version": "1.2.0"},
+            }
+        )
+        prompt = render_release_prompt(booking, NOW)
+        assert "find_open_slots" in prompt and "get a clear yes" in prompt
+        assert 'unless book_slot returned "confirmed"' in prompt
+    knowledge = ReleaseKnowledge(NoRelease("x"))
+    knowledge.snapshot = booking
+    names = {t.info.name for t in knowledge.function_tools()}
+    assert {"find_open_slots", "book_slot"} <= names

@@ -10,7 +10,7 @@ import logging
 import re
 import uuid
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -20,6 +20,7 @@ from praxima.runtime.prompting import render_release_prompt
 from praxima.runtime.release import lookup
 from praxima.runtime.release.loader import LoadedRelease, NoRelease, load_release
 from praxima.runtime.release.recorder import CallRecorder, RecordingUnavailable
+from praxima.shared.kernel.slots import open_slots
 
 logger = logging.getLogger(__name__)
 READ_TOOLS = (
@@ -28,7 +29,10 @@ READ_TOOLS = (
     "get_availability",
     "search_knowledge",
     "get_announcements",
+    "find_open_slots",
 )
+_DATE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+_TIME = re.compile(r"^[0-2][0-9]:[0-5][0-9]$")
 _CALL_ID = re.compile(r"^[A-Za-z0-9_.:-]{1,200}$")
 UNAVAILABLE = (
     "Published information is unavailable right now. Do not invent any facts. Explain "
@@ -43,6 +47,8 @@ class ReleaseKnowledge:
         # The worker logs "loaded"/"unavailable" from this, as for the legacy knowledge.
         self.snapshot = self.loaded.snapshot if self.loaded else None
         self.recorder: CallRecorder | None = None
+        # Bookings made on this call, so a retried tool call answers the same way.
+        self._booked: dict[tuple[str, datetime], dict[str, Any]] = {}
 
     async def start_call(
         self, *, called_number: str, is_sip: bool, attributes: Mapping[str, str]
@@ -117,6 +123,7 @@ class ReleaseKnowledge:
             "get_availability": self.get_availability,
             "search_knowledge": self.search_knowledge,
             "get_announcements": self.get_announcements,
+            "find_open_slots": self.find_open_slots,
         }
         if self.snapshot.entity_types:
             # Name this release's entry types (doctor, property …) instead of hard-coding them.
@@ -127,6 +134,8 @@ class ReleaseKnowledge:
                 description=f"Find published directory entries. Entry types: {types}.",
             )
         chosen = [tools[key] for key in READ_TOOLS if key in enabled]
+        if "book_slot" in enabled:
+            chosen.append(self.book_slot)
         if self._request_kinds() != set():
             chosen.append(self.create_request)
         return chosen
@@ -264,6 +273,221 @@ class ReleaseKnowledge:
                 "note": "Staff will contact the caller to confirm. This is not a booking.",
             },
         )
+
+    # ---------------------------------------------------------- slot booking
+
+    async def _open_slots(
+        self, entity_id: str, days: list[date]
+    ) -> tuple[dict[str, Any], list[datetime]]:
+        """Open slots from the release's published hours minus live bookings (shared maths)."""
+        assert self.snapshot is not None and self.recorder is not None
+        zone = ZoneInfo(self.snapshot.workspace.timezone)
+        starts = datetime.combine(days[0], time(), zone)
+        ends = datetime.combine(days[-1] + timedelta(days=1), time(), zone)
+        context = await self.recorder.slot_context(entity_id, starts, ends)
+        if not context.get("enabled"):
+            return context, []
+        rules, exceptions = lookup.entity_hours(self.snapshot, entity_id)
+        busy = [
+            (datetime.fromisoformat(a), datetime.fromisoformat(b))
+            for a, b in context.get("busy", [])
+        ]
+        return context, open_slots(
+            rules=rules,
+            exceptions=exceptions,
+            timezone=self.snapshot.workspace.timezone,
+            slot_minutes=int(context["slot_minutes"]),
+            busy=busy,
+            now=self._now(),
+            first_day=days[0],
+            days=len(days),
+            notice_minutes=int(context["min_notice_minutes"]),
+            horizon_days=int(context["horizon_days"]),
+        )
+
+    def _days(self, on: str) -> list[date] | None:
+        today = self._now().date()
+        if not on:
+            return [today + timedelta(days=i) for i in range(7)]
+        if not _DATE.fullmatch(on):
+            return None
+        try:
+            return [date.fromisoformat(on)]
+        except ValueError:
+            return None
+
+    @function_tool()
+    async def find_open_slots(self, name: str, date: str = "") -> dict[str, Any]:
+        """Open booking slots of one bookable directory entry, for a date or the next week.
+
+        Only these times can be booked; never offer any other time.
+
+        Args:
+            name: The entry, as the caller said it.
+            date: Optional date as YYYY-MM-DD in the business timezone; empty for the next 7 days.
+        """
+        assert self.snapshot is not None
+        entity = lookup.resolve_entity(self.snapshot, name)
+        if entity is None:
+            return self._track(
+                "find_open_slots",
+                {
+                    "status": "not_found",
+                    "hint": "Ask which one the caller means, or use find_entities.",
+                },
+            )
+        days = self._days(date)
+        if days is None:
+            return self._track(
+                "find_open_slots",
+                {"status": "invalid_date", "hint": "Use YYYY-MM-DD in the business timezone."},
+            )
+        if self.recorder is None:
+            return self._track("find_open_slots", {"status": "unavailable"})
+        try:
+            context, starts = await self._open_slots(entity.id, days)
+        except RecordingUnavailable as exc:
+            logger.warning("Open slots unavailable (%s)", exc)
+            return self._track("find_open_slots", {"status": "unavailable"})
+        if not context.get("enabled"):
+            return self._track(
+                "find_open_slots",
+                {"status": "not_bookable", "entity": entity.name, "hint": "Offer create_request."},
+            )
+        if not starts:
+            return self._track(
+                "find_open_slots",
+                {
+                    "status": "no_open_slots",
+                    "entity": entity.name,
+                    "hint": "Offer another day, or leave a request with create_request.",
+                },
+            )
+        return self._track(
+            "find_open_slots",
+            {
+                "status": "success",
+                "entity": entity.name,
+                "timezone": self.snapshot.workspace.timezone,
+                "slots": lookup.describe_slots(starts),
+                "more_available": len(starts) > 12,
+                "requires_staff_confirmation": bool(context.get("requires_confirmation", True)),
+                "note": "Offer two or three of these times. Only these can be booked.",
+            },
+        )
+
+    @function_tool()
+    async def book_slot(
+        self,
+        name: str,
+        date: str,
+        time: str,
+        caller_name: str,
+        use_calling_number: bool = False,
+        callback_number: str = "",
+        about: str = "",
+    ) -> dict[str, Any]:
+        """Book one open slot for the caller. Read back the entry, date, time, name and number
+        first, and call this only after the caller clearly says yes.
+
+        Args:
+            name: The entry being booked, as the caller said it.
+            date: The slot's date, YYYY-MM-DD, from find_open_slots.
+            time: The slot's start time, HH:MM (24-hour), from find_open_slots.
+            caller_name: The caller's name.
+            use_calling_number: True if the caller agreed to be reached on the number they are
+                calling from.
+            callback_number: Otherwise a number the caller dictated, with country code (+91…).
+            about: Optional service or project the booking is for, as the caller said it.
+        """
+        assert self.snapshot is not None
+        fix: dict[str, str] = {}
+        if not caller_name.strip():
+            fix["caller_name"] = "Ask for the caller's name."
+        if not _DATE.fullmatch(date):
+            fix["date"] = "Use YYYY-MM-DD from find_open_slots."
+        if not _TIME.fullmatch(time):
+            fix["time"] = "Use HH:MM (24-hour) from find_open_slots."
+        number = callback_number.replace(" ", "").replace("-", "")
+        if use_calling_number and self.recorder is not None and self.recorder.caller_number:
+            number = self.recorder.caller_number
+        if not number:
+            fix["callback_number"] = (
+                "Ask whether to use the number they're calling from, or take one with country code."
+            )
+        elif not lookup.E164.fullmatch(number):
+            fix["callback_number"] = "Use the full number with country code, e.g. +91…"
+        if fix:
+            return self._track("book_slot", {"status": "invalid", "fix": fix})
+        entity = lookup.resolve_entity(self.snapshot, name)
+        subject = lookup.resolve_entity(self.snapshot, about) if about.strip() else None
+        if entity is None or (about.strip() and subject is None):
+            return self._track(
+                "book_slot",
+                {"status": "not_found", "hint": "Confirm which one the caller means first."},
+            )
+        try:
+            day = datetime.strptime(date, "%Y-%m-%d").date()
+            hour, minute = (int(part) for part in time.split(":"))
+            starts_at = datetime.combine(
+                day,
+                datetime.min.time().replace(hour=hour, minute=minute),
+                ZoneInfo(self.snapshot.workspace.timezone),
+            )
+        except ValueError:
+            return self._track("book_slot", {"status": "invalid", "fix": {"date": "Not a date."}})
+        if self.recorder is None:
+            return self._track("book_slot", {"status": "unavailable"})
+        fallback = {"status": "unavailable", "say": self.snapshot.agent.fallback_message}
+        if (entity.id, starts_at) in self._booked:
+            return self._track("book_slot", self._booked[(entity.id, starts_at)])
+        try:
+            context, starts = await self._open_slots(entity.id, [day])
+            if not context.get("enabled"):
+                return self._track(
+                    "book_slot", {"status": "not_bookable", "hint": "Offer create_request."}
+                )
+            if starts_at not in starts:
+                return self._track(
+                    "book_slot",
+                    {
+                        "status": "not_open",
+                        "alternatives": lookup.describe_slots(starts, 4),
+                        "hint": "That time isn't open. Offer one of the alternatives.",
+                    },
+                )
+            result = await self.recorder.book_slot(
+                entity_id=entity.id,
+                subject_id=subject.id if subject else None,
+                starts_at=starts_at,
+                name=caller_name.strip()[:200],
+                phone=number,
+            )
+        except RecordingUnavailable as exc:
+            logger.warning("Booking not recorded (%s)", exc)
+            return self._track("book_slot", fallback)
+        status = result.get("status")
+        if status in ("held", "confirmed"):
+            answer = {
+                "status": status,
+                "reference": str(result.get("id", ""))[:8],
+                "say": "The slot is reserved for the caller. The team will call to confirm it."
+                if status == "held"
+                else "It is booked for that date and time.",
+            }
+            self._booked[(entity.id, starts_at)] = answer
+            return self._track("book_slot", answer)
+        if status == "taken":
+            _, again = await self._open_slots(entity.id, [day])
+            return self._track(
+                "book_slot",
+                {
+                    "status": "taken",
+                    "alternatives": lookup.describe_slots(again, 4),
+                    "hint": "Someone just took that time. Offer one of the alternatives.",
+                },
+            )
+        return self._track("book_slot", {"status": status or "unavailable", **fallback})
 
 
 async def load_release_knowledge(called_number: str) -> ReleaseKnowledge:

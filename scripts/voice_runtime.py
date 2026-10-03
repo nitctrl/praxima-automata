@@ -1,7 +1,8 @@
 """Give the voice worker's database login only the calls it needs, and nothing else.
 
-It may look up a call's live release and record the call (conversation, content-free events,
-requests with already-encrypted personal details), all through SECURITY DEFINER functions.
+It may look up a call's live release, record the call (conversation, content-free events,
+requests with already-encrypted personal details) and book open slots, all through SECURITY
+DEFINER functions.
 
     uv run python scripts/voice_runtime.py grant <role>   # allow <role> those functions
     uv run python scripts/voice_runtime.py check <role>   # confirm it can do nothing else
@@ -34,6 +35,9 @@ FUNCTIONS = (
     "engagement.runtime_finish_conversation(uuid, uuid, text, text, text, text)",
     "engagement.runtime_create_work_item("
     "uuid, uuid, uuid, text, text, jsonb, uuid, bytea, bytea, text)",
+    "scheduling.runtime_slot_context(uuid, uuid, timestamptz, timestamptz)",
+    "scheduling.runtime_book_slot("
+    "uuid, uuid, uuid, uuid, uuid, uuid, timestamptz, text, bytea, bytea, text, text)",
 )
 ROLE = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 
@@ -56,7 +60,7 @@ async def run(command: str, role: str) -> int:
         async with engine.begin() as connection:
             if command == "grant":
                 # The role name is validated above; identifiers can't be bound parameters.
-                for schema in ("releases", "engagement"):
+                for schema in ("releases", "engagement", "scheduling"):
                     await connection.execute(text(f'GRANT USAGE ON SCHEMA {schema} TO "{role}"'))
                 for function in FUNCTIONS:
                     await connection.execute(
