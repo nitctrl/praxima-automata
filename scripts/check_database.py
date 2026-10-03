@@ -57,8 +57,12 @@ async def check(url: str) -> int:
             )
             revision = (
                 await connection.scalar(text("SELECT version_num FROM ops.alembic_version"))
+                # The restricted API login may not read Alembic's table (owner only): fine.
                 if await connection.scalar(
-                    text("SELECT to_regclass('ops.alembic_version') IS NOT NULL")
+                    text(
+                        "SELECT to_regclass('ops.alembic_version') IS NOT NULL AND "
+                        "has_table_privilege('ops.alembic_version', 'SELECT')"
+                    )
                 )
                 else None
             )
